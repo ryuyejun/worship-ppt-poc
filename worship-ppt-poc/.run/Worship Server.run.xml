@@ -1,0 +1,12 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Worship Server" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="org.localchurch.worship.web.LocalWeb" />
+    <module name="worship-ppt-poc.main" />
+    <option name="VM_PARAMETERS" value="-Dworship.mysql.config=&quot;$PROJECT_DIR$/.server/mysql.properties&quot;" />
+    <option name="PROGRAM_PARAMETERS" value="--open" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
