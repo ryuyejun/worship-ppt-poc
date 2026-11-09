@@ -1,0 +1,1 @@
+window.LOCAL_ACCESS_TOKEN = window.LOCAL_ACCESS_TOKEN || '';
