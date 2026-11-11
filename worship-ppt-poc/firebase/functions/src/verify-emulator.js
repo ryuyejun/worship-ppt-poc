@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import { initializeApp } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+import { findSongs, requestMissingSong } from './songs.js';
+import { createPpt } from './ppt.js';
+import JSZip from 'jszip';
+
+if (!/^((127\.0\.0\.1|localhost):\d+)$/.test(process.env.FIRESTORE_EMULATOR_HOST || '') || !/^demo-/.test(process.env.GCLOUD_PROJECT || '')) throw new Error('Only local emulator testing is allowed');
+initializeApp({ projectId: process.env.GCLOUD_PROJECT });
+const db = getFirestore();
+const found = await findSongs(db, ' 소중해   존귀해 보배로워 ');
+assert.equal(found.length, 1);
+assert.ok(found[0].lyrics?.trim());
+const hymn = await findSongs(db, '405');
+assert.ok(hymn.length > 0);
+const deck = await createPpt(found);
+const zip = await JSZip.loadAsync(deck);
+assert.ok(zip.file('ppt/slides/slide1.xml'));
+assert.equal(await requestMissingSong(db, '에뮬레이터   테스트 요청'), 1);
+assert.equal(await requestMissingSong(db, '에뮬레이터 테스트 요청'), 2);
+console.log('Firestore title and hymn search, PPTX generation, and duplicate request test passed');
