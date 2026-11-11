@@ -36,7 +36,6 @@ export function WorshipApp() {
   const [readySongs, setReadySongs] = useState<Song[]>([]);
   const [allSongs, setAllSongs] = useState<Song[]>([]);
   const [query, setQuery] = useState('');
-  const [lyricist, setLyricist] = useState('');
   const [libraryQuery, setLibraryQuery] = useState('');
   const [results, setResults] = useState<Song[]>([]);
   const [selected, setSelected] = useState<Song[]>([]);
@@ -215,7 +214,7 @@ export function WorshipApp() {
         messages.push(...providers.data.status);
       } catch { messages.push('추가 제공처: 조회 실패'); }
       try {
-        const local = await api<Song[]>('/search', { title: query.trim(), author: lyricist.trim() });
+        const local = await api<Song[]>('/search', { title: query.trim() });
         setResults(local.data);
         messages.push(`내 DB: 가사 ${local.data.length}곡`);
         if (local.data.length === 1) setActiveSong(local.data[0]);
@@ -384,7 +383,6 @@ export function WorshipApp() {
                 <div className="editor-heading"><h2>찬양 찾기</h2><span>{categories.songs}곡</span></div>
                 <form className="editor-search" onSubmit={searchSongs}>
                   <label className="style-field"><span>곡 제목 또는 찬송가 번호</span><input autoComplete="off" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제목 또는 찬송가 번호" /></label>
-                  <label className="style-field"><span>작사가 <em>선택</em></span><input autoComplete="off" value={lyricist} onChange={(event) => setLyricist(event.target.value)} placeholder="작사가 이름" /></label>
                   <button className="btn btn--primary" type="submit" disabled={searching || !query.trim()}>{searching ? '통합 검색 중' : '곡 찾기'}</button>
                 </form>
                 {searchNotice && <p className={`notice ${searchNotice.kind ?? ''}`} role="status">{searchNotice.text}</p>}
