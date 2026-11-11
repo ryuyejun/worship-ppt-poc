@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import org.localchurch.worship.ppt.PptBatch;
 import org.localchurch.worship.ppt.PptStyle;
 import org.localchurch.worship.ppt.dto.request.PptStyleRequest;
+import org.localchurch.worship.ppt.dto.request.ExternalPptSong;
 import org.localchurch.worship.ppt.dto.request.PptBatchRequest;
 import org.localchurch.worship.ppt.dto.response.PptPreviewResponse;
 import org.apache.poi.xslf.usermodel.XMLSlideShow;
@@ -29,11 +30,11 @@ public class PptService {
     private final SongRepository repository;
 
     public byte[] single(long id) throws Exception {
-        return create(List.of(id), null, null);
+        return create(List.of(id), null, null, null);
     }
 
     public PptPreviewResponse preview(PptBatchRequest input, int requestedIndex) throws Exception {
-        byte[] presentation = create(input.songIds(), input.pptxBase64(), input.style());
+        byte[] presentation = create(input.songIds(), input.externalSongs(), input.pptxBase64(), input.style());
         try (XMLSlideShow deck = new XMLSlideShow(new ByteArrayInputStream(presentation));
                 ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             int count = deck.getSlides().size();
@@ -62,10 +63,10 @@ public class PptService {
         }
     }
 
-    public byte[] create(List<Long> ids, String encoded, PptStyleRequest style) throws Exception {
+    public byte[] create(List<Long> ids, List<ExternalPptSong> externalSongs, String encoded, PptStyleRequest style) throws Exception {
         if (ids == null || ids.isEmpty() || ids.size() > 100)
             throw new IllegalArgumentException("곡을 1곡 이상 100곡 이하로 선택하세요.");
-        if (ids.stream().anyMatch(id -> id == null || id < 1))
+        if (ids.stream().anyMatch(id -> id == null || id == 0))
             throw new IllegalArgumentException("곡 ID를 확인하세요.");
         byte[] original = null;
         if (encoded != null) {
@@ -80,8 +81,22 @@ public class PptService {
                 throw new IllegalArgumentException("PPTX는 20MB 이하여야 합니다.");
         }
         try {
-            List<Song> songs = ids.stream().map(id -> repository.findById(id)
-                    .orElseThrow(() -> new IllegalArgumentException("해당 ID가 없습니다: " + id))).toList();
+            Map<Long, ExternalPptSong> external = new HashMap<>();
+            if (externalSongs != null) {
+                for (ExternalPptSong song : externalSongs) {
+                    if (song.id() >= 0 || external.put(song.id(), song) != null)
+                        throw new IllegalArgumentException("외부 곡 ID를 확인하세요.");
+                }
+            }
+            List<Song> songs = ids.stream().map(id -> {
+                if (id > 0) return repository.findById(id)
+                        .orElseThrow(() -> new IllegalArgumentException("해당 ID가 없습니다: " + id));
+                ExternalPptSong song = external.get(id);
+                if (song == null || song.lyrics() == null || song.lyrics().isBlank())
+                    throw new IllegalArgumentException("외부 가사를 확인하세요.");
+                return new Song(id, song.title(), song.title(), null, null, song.artist(),
+                        song.lyrics(), "https://lrclib.net", null, "USER_SUPPLIED", null, null);
+            }).toList();
             if (songs.stream().anyMatch(song -> song.lyrics() == null || song.lyrics().isBlank()))
                 throw new IllegalArgumentException("가사가 저장된 곡만 PPT를 만들 수 있습니다.");
             return PptBatch.createFromSongs(songs, original, PptStyle.from(style));

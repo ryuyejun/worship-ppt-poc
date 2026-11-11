@@ -61,6 +61,19 @@ class LocalWebIntegrationTest {
   mvc.perform(request("/ppt/batch","{\"songIds\":["+id1+"],\"pptxBase64\":\"bm90IHBwdA==\"}")).andExpect(status().isBadRequest());
   mvc.perform(request("/ppt/batch","{\"songIds\":[1.5]}")).andExpect(status().isBadRequest());
  }
+ @Test void temporaryExternalLyricsCanBePreviewedAndExported() throws Exception {
+  Map<String,Object> external=Map.of("id",-123,"title","원본 테스트 노래","artist","테스트","lyrics","테스트 한 줄\n또 다른 줄");
+  Map<String,Object> presentation=Map.of("songIds",List.of(id1,-123),"externalSongs",List.of(external));
+  String body=json.writeValueAsString(presentation);
+  byte[] bytes=mvc.perform(request("/ppt/batch",body)).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray();
+  try(var deck=new XMLSlideShow(new ByteArrayInputStream(bytes))) {
+   assertEquals(2,deck.getSlides().size());
+   assertTrue(((org.apache.poi.xslf.usermodel.XSLFTextShape)deck.getSlides().get(1).getShapes().get(0)).getText().contains("테스트 한 줄"));
+  }
+  mvc.perform(request("/ppt/preview",json.writeValueAsString(Map.of("presentation",presentation,"slideIndex",1))))
+   .andExpect(status().isOk()).andExpect(jsonPath("$.data.slideIndex").value(1));
+  mvc.perform(request("/ppt/batch","{\"songIds\":[-123]}" )).andExpect(status().isBadRequest());
+ }
  @Test void singlePptAndImportValidation()throws Exception{
   mvc.perform(request("/ppt","{\"id\":"+id1+"}")).andExpect(status().isOk()).andExpect(content().contentType("application/vnd.openxmlformats-officedocument.presentationml.presentation"));
   mvc.perform(request("/batch-import","{\"files\":[]}")).andExpect(status().isBadRequest());

@@ -30,7 +30,7 @@ public class PptController {
     @PostMapping("/ppt/batch")
     public ResponseEntity<byte[]> batch(@Valid @RequestBody PptBatchRequest input)
             throws Exception {
-        return download(service.create(input.songIds(), input.pptxBase64(), input.style()));
+        return download(service.create(input.songIds(), input.externalSongs(), input.pptxBase64(), input.style()));
     }
 
     @PostMapping("/ppt/preview")

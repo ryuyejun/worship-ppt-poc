@@ -4,6 +4,7 @@ export interface Song {
   author: string | null;
   composer: string | null;
   artist: string | null;
+  album?: string | null;
   status: string;
   category: string | null;
   hymnNumber: number | null;

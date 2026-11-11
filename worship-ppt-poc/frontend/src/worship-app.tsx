@@ -8,7 +8,7 @@ type PptStyle = {
   alignment: 'LEFT' | 'CENTER' | 'RIGHT'; linesPerSlide: number; bold: boolean;
 };
 type Preview = { imageBase64: string; slideIndex: number; slideCount: number };
-type PptPayload = { songIds: number[]; pptxBase64?: string; style: PptStyle & { backgroundImageBase64?: string; backgroundImageType?: string } };
+type PptPayload = { songIds: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; pptxBase64?: string; style: PptStyle & { backgroundImageBase64?: string; backgroundImageType?: string } };
 
 const templateStyles: Record<string, PptStyle> = {
   original: { backgroundColor: '#16233a', textColor: '#ffffff', fontFamily: 'Apple SD Gothic Neo', fontSize: 40, alignment: 'CENTER', linesPerSlide: 2, bold: false },
@@ -44,6 +44,8 @@ export function WorshipApp() {
   const [searchNotice, setSearchNotice] = useState<Notice>(null);
   const [pptNotice, setPptNotice] = useState<Notice>(null);
   const [searching, setSearching] = useState(false);
+  const [externalSearching, setExternalSearching] = useState(false);
+  const [externalResults, setExternalResults] = useState<Song[]>([]);
   const [creating, setCreating] = useState(false);
   const [loadingSongs, setLoadingSongs] = useState(true);
   const [requests, setRequests] = useState<SongRequest[]>([]);
@@ -71,6 +73,7 @@ export function WorshipApp() {
   function presentationPayload(): PptPayload {
     return {
       songIds: selected.map((song) => song.id),
+      externalSongs: selected.filter((song) => song.id < 0).map((song) => ({ id: song.id, title: song.title, artist: song.artist, lyrics: song.lyrics ?? '' })),
       ...(existingPptData ? { pptxBase64: existingPptData } : {}),
       style: { ...pptStyle, ...(backgroundImage ? { backgroundImageBase64: backgroundImage.dataUrl.split(',')[1], backgroundImageType: backgroundImage.type } : {}) },
     };
@@ -176,6 +179,7 @@ export function WorshipApp() {
     if (!query.trim()) return;
     setSearching(true);
     setResults([]);
+    setExternalResults([]);
     setActiveSong(null);
     setSearchNotice(null);
     try {
@@ -195,6 +199,27 @@ export function WorshipApp() {
     } finally {
       setSearching(false);
     }
+  }
+
+  async function searchLrclib() {
+    if (!query.trim()) return;
+    setExternalSearching(true); setExternalResults([]); setActiveSong(null); setSearchNotice(null);
+    try {
+      const url = new URL('https://lrclib.net/api/search');
+      url.searchParams.set('track_name', query.trim());
+      const response = await fetch(url, { headers: { 'X-User-Agent': 'WorshipPPT/1.0 (https://github.com/ryuyejun/worship-ppt-poc)' } });
+      if (!response.ok) throw new Error(response.status === 429 ? 'LRCLIB 요청이 많습니다. 잠시 후 다시 시도해 주세요.' : 'LRCLIB에 연결하지 못했습니다.');
+      const records = await response.json() as { id: number; trackName: string; artistName: string; albumName: string; plainLyrics: string | null; syncedLyrics: string | null }[];
+      const found: Song[] = records.filter((record) => record.plainLyrics?.trim() || record.syncedLyrics?.trim()).map((record) => ({
+        id: -record.id, title: record.trackName, author: null, composer: null, artist: record.artistName,
+        status: 'USER_SUPPLIED', category: null, hymnNumber: null, source: 'https://lrclib.net', album: record.albumName,
+        lyrics: (record.plainLyrics || record.syncedLyrics?.replace(/^\[\d{2}:\d{2}(?:\.\d+)?\]\s*/gm, '') || '').trim(),
+      }));
+      setExternalResults(found);
+      setSearchNotice({ text: found.length ? `LRCLIB에서 ${found.length}곡을 찾았습니다. 가수와 가사를 확인하고 선택해 주세요. 작사자 검색은 지원하지 않습니다.` : 'LRCLIB에서 가사가 있는 곡을 찾지 못했습니다.' });
+    } catch (error) {
+      setSearchNotice({ text: error instanceof Error ? error.message : 'LRCLIB 검색에 실패했습니다.', kind: 'error' });
+    } finally { setExternalSearching(false); }
   }
 
   function addSelection(song: Song) {
@@ -359,9 +384,11 @@ export function WorshipApp() {
                   <label className="style-field"><span>작사가 <em>선택</em></span><input autoComplete="off" value={lyricist} onChange={(event) => setLyricist(event.target.value)} placeholder="작사가 이름" /></label>
                   <button className="btn btn--primary" type="submit" disabled={searching || !query.trim()}>{searching ? '찾는 중' : '곡 찾기'}</button>
                 </form>
+                <button className="btn btn--secondary" type="button" disabled={externalSearching || !query.trim()} onClick={() => void searchLrclib()}>{externalSearching ? 'LRCLIB 검색 중' : 'LRCLIB에서 찾기'}</button>
                 {searchNotice && <p className={`notice ${searchNotice.kind ?? ''}`} role="status">{searchNotice.text}</p>}
+                {externalResults.length > 0 && <div className="result-list"><div className="result-heading">LRCLIB 검색 결과 <span>{externalResults.length}</span></div>{externalResults.map((song) => <button className={`result-row ${activeSong?.id === song.id ? 'is-active' : ''}`} key={song.id} type="button" onClick={() => setActiveSong(song)}><span className="result-main"><strong>{song.title}</strong><small>가수 {displayPerson(song.artist)} · 앨범 {displayPerson(song.album)}</small></span><span className="result-meta">→</span></button>)}</div>}
                 {results.length > 0 && <div className="result-list" aria-live="polite"><div className="result-heading">검색 결과 <span>{results.length}</span></div>{results.map((song) => <button className={`result-row ${activeSong?.id === song.id ? 'is-active' : ''}`} key={song.id} type="button" onClick={() => setActiveSong(song)}><span className="result-main"><strong>{song.title}</strong><small>작사 {displayPerson(song.author)}</small></span><span className="result-meta" aria-hidden="true">→</span></button>)}</div>}
-                {activeSong && <article className="song-detail" aria-live="polite"><div className="detail-title"><div><p className="eyebrow">선택한 찬양</p><h3>{activeSong.title}</h3></div><button className="icon-button" onClick={() => setActiveSong(null)} aria-label="선택한 곡 닫기">×</button></div><dl className="song-meta"><div><dt>작사</dt><dd>{displayPerson(activeSong.author)}</dd></div><div><dt>작곡</dt><dd>{displayPerson(activeSong.composer)}</dd></div><div><dt>공연팀</dt><dd>{displayPerson(activeSong.artist)}</dd></div></dl><div className="lyrics-preview"><span>가사 미리보기</span><p>{activeSong.lyrics?.trim().slice(0, 520)}{(activeSong.lyrics?.length ?? 0) > 520 ? '…' : ''}</p></div><button className="btn btn--secondary add-button" onClick={() => addSelection(activeSong)}>제작 목록에 추가</button></article>}
+                {activeSong && <article className="song-detail" aria-live="polite"><div className="detail-title"><div><p className="eyebrow">선택한 찬양</p><h3>{activeSong.title}</h3></div><button className="icon-button" onClick={() => setActiveSong(null)} aria-label="선택한 곡 닫기">×</button></div><dl className="song-meta"><div><dt>작사</dt><dd>{displayPerson(activeSong.author)}</dd></div><div><dt>작곡</dt><dd>{displayPerson(activeSong.composer)}</dd></div><div><dt>공연팀</dt><dd>{displayPerson(activeSong.artist)}</dd></div></dl><div className="lyrics-preview"><span>가사 미리보기</span><p>{activeSong.id < 0 ? activeSong.lyrics?.trim() : activeSong.lyrics?.trim().slice(0, 520)}{activeSong.id > 0 && (activeSong.lyrics?.length ?? 0) > 520 ? '…' : ''}</p></div>{activeSong.id < 0 && <p className="editor-hint">LRCLIB 제공 가사입니다. 곡과 가사를 확인하고 이용 권한이 있는 경우에 사용해 주세요. DB에는 저장되지 않습니다.</p>}<button className="btn btn--secondary add-button" onClick={() => addSelection(activeSong)}>제작 목록에 추가</button></article>}
                 <div className="editor-section"><div className="editor-heading"><h2>가사 등록 곡</h2><span>{filteredReady.length}곡</span></div><label className="style-field"><span className="visually-hidden">등록된 찬양 검색</span><input value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} placeholder="등록된 곡 검색" /></label>
                   {loadingSongs ? <div className="empty-state">곡 목록을 불러오는 중입니다.</div> : libraryError ? <div className="empty-state empty-state--error">{libraryError}</div> : filteredReady.length === 0 ? <div className="empty-state">일치하는 곡이 없습니다.</div> : <div className="editor-library">{filteredReady.slice(0, 14).map((song) => <div className="library-row" key={song.id}><button className="library-title" type="button" onClick={() => addSelection(song)}><strong>{song.title}</strong><small>{song.category?.toUpperCase() === 'HYMN' && song.hymnNumber ? `새찬송가 ${song.hymnNumber}장` : 'CCM'} · 작사 {displayPerson(song.author)}</small></button><button className="add-mini" type="button" onClick={() => addSelection(song)} aria-label={`${song.title} 제작 목록에 추가`}>추가</button></div>)}</div>}
                 </div>
