@@ -44,7 +44,7 @@ export function WorshipApp() {
   const [searchNotice, setSearchNotice] = useState<Notice>(null);
   const [pptNotice, setPptNotice] = useState<Notice>(null);
   const [searching, setSearching] = useState(false);
-  const [externalSearching, setExternalSearching] = useState(false);
+  const [providerInfo, setProviderInfo] = useState<{ title: string; artist: string; source: string }[]>([]);
   const [externalResults, setExternalResults] = useState<Song[]>([]);
   const [creating, setCreating] = useState(false);
   const [loadingSongs, setLoadingSongs] = useState(true);
@@ -177,49 +177,52 @@ export function WorshipApp() {
   async function searchSongs(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!query.trim()) return;
-    setSearching(true);
-    setResults([]);
-    setExternalResults([]);
-    setActiveSong(null);
-    setSearchNotice(null);
+    setSearching(true); setResults([]); setExternalResults([]); setProviderInfo([]); setActiveSong(null); setSearchNotice(null);
+    const messages: string[] = [];
     try {
-      const result = await api<Song[]>('/search', { title: query.trim(), author: lyricist.trim() });
-      setResults(result.data);
-      if (result.data.length === 0) {
-        const count = result.headers.get('X-Request-Count');
-        setSearchNotice({
-          text: `저장된 가사가 있는 곡을 찾지 못했습니다. 곡 추가 대기열에 기록했습니다${count ? ` · 요청 ${count}회` : ''}.`,
-        });
-        await loadRequests();
-      } else if (result.data.length === 1) {
-        setActiveSong(result.data[0]);
+      let found: Song[] = [];
+      try {
+        const url = new URL('https://lrclib.net/api/search');
+        url.searchParams.set('track_name', query.trim());
+        const response = await fetch(url, { headers: { 'X-User-Agent': 'WorshipPPT/1.0 (https://github.com/ryuyejun/worship-ppt-poc)' }, signal: AbortSignal.timeout(8000) });
+        if (!response.ok) throw new Error('요청 실패');
+        const records = await response.json() as { id: number; trackName: string; artistName: string; albumName: string; plainLyrics: string | null; syncedLyrics: string | null }[];
+        const unique = new Set<string>();
+        found = records.filter((record) => {
+          if (!record.plainLyrics?.trim() && !record.syncedLyrics?.trim()) return false;
+          const key = [record.trackName, record.artistName, record.albumName, record.plainLyrics || record.syncedLyrics || ''].map((value) => (value || '').normalize('NFC').toLowerCase().replace(/\s+/g, '')).join('|');
+          if (unique.has(key)) return false;
+          unique.add(key); return true;
+        }).map((record) => ({
+          id: -record.id, title: record.trackName, author: null, composer: null, artist: record.artistName,
+          status: 'USER_SUPPLIED', category: null, hymnNumber: null, source: 'https://lrclib.net', album: record.albumName,
+          lyrics: (record.plainLyrics || record.syncedLyrics?.replace(/^\[\d{2}:\d{2}(?:\.\d+)?\]\s*/gm, '') || '').trim(),
+        }));
+        messages.push(`LRCLIB: 가사 ${found.length}곡`);
+      } catch { messages.push('LRCLIB: 연결 실패'); }
+      if (found.length) {
+        setExternalResults(found);
+        setSearchNotice({ text: messages.join(' · ') + ' · 작사자는 확인할 수 없으므로 가수와 가사를 확인해 주세요.' });
+        return;
       }
-    } catch (error) {
-      setSearchNotice({ text: error instanceof Error ? error.message : '검색에 실패했습니다.', kind: 'error' });
-    } finally {
-      setSearching(false);
-    }
-  }
-
-  async function searchLrclib() {
-    if (!query.trim()) return;
-    setExternalSearching(true); setExternalResults([]); setActiveSong(null); setSearchNotice(null);
-    try {
-      const url = new URL('https://lrclib.net/api/search');
-      url.searchParams.set('track_name', query.trim());
-      const response = await fetch(url, { headers: { 'X-User-Agent': 'WorshipPPT/1.0 (https://github.com/ryuyejun/worship-ppt-poc)' } });
-      if (!response.ok) throw new Error(response.status === 429 ? 'LRCLIB 요청이 많습니다. 잠시 후 다시 시도해 주세요.' : 'LRCLIB에 연결하지 못했습니다.');
-      const records = await response.json() as { id: number; trackName: string; artistName: string; albumName: string; plainLyrics: string | null; syncedLyrics: string | null }[];
-      const found: Song[] = records.filter((record) => record.plainLyrics?.trim() || record.syncedLyrics?.trim()).map((record) => ({
-        id: -record.id, title: record.trackName, author: null, composer: null, artist: record.artistName,
-        status: 'USER_SUPPLIED', category: null, hymnNumber: null, source: 'https://lrclib.net', album: record.albumName,
-        lyrics: (record.plainLyrics || record.syncedLyrics?.replace(/^\[\d{2}:\d{2}(?:\.\d+)?\]\s*/gm, '') || '').trim(),
-      }));
-      setExternalResults(found);
-      setSearchNotice({ text: found.length ? `LRCLIB에서 ${found.length}곡을 찾았습니다. 가수와 가사를 확인하고 선택해 주세요. 작사자 검색은 지원하지 않습니다.` : 'LRCLIB에서 가사가 있는 곡을 찾지 못했습니다.' });
-    } catch (error) {
-      setSearchNotice({ text: error instanceof Error ? error.message : 'LRCLIB 검색에 실패했습니다.', kind: 'error' });
-    } finally { setExternalSearching(false); }
+      try {
+        const providers = await api<{ candidates: { title: string; artist: string; source: string }[]; status: string[] }>('/providers/search', { title: query.trim() });
+        const unique = new Set<string>();
+        setProviderInfo(providers.data.candidates.filter((candidate) => {
+          const key = [candidate.title, candidate.artist, candidate.source].map((value) => value.normalize('NFC').toLowerCase().replace(/\s+/g, '')).join('|');
+          if (unique.has(key)) return false; unique.add(key); return true;
+        }));
+        messages.push(...providers.data.status);
+      } catch { messages.push('추가 제공처: 조회 실패'); }
+      try {
+        const local = await api<Song[]>('/search', { title: query.trim(), author: lyricist.trim() });
+        setResults(local.data);
+        messages.push(`내 DB: 가사 ${local.data.length}곡`);
+        if (local.data.length === 1) setActiveSong(local.data[0]);
+        if (!local.data.length) { messages.push('곡 추가 대기열에 기록했습니다'); await loadRequests(); }
+      } catch { messages.push('내 DB: 조회 실패'); }
+      setSearchNotice({ text: messages.join(' · ') });
+    } finally { setSearching(false); }
   }
 
   function addSelection(song: Song) {
@@ -382,10 +385,10 @@ export function WorshipApp() {
                 <form className="editor-search" onSubmit={searchSongs}>
                   <label className="style-field"><span>곡 제목 또는 찬송가 번호</span><input autoComplete="off" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제목 또는 찬송가 번호" /></label>
                   <label className="style-field"><span>작사가 <em>선택</em></span><input autoComplete="off" value={lyricist} onChange={(event) => setLyricist(event.target.value)} placeholder="작사가 이름" /></label>
-                  <button className="btn btn--primary" type="submit" disabled={searching || !query.trim()}>{searching ? '찾는 중' : '곡 찾기'}</button>
+                  <button className="btn btn--primary" type="submit" disabled={searching || !query.trim()}>{searching ? '통합 검색 중' : '곡 찾기'}</button>
                 </form>
-                <button className="btn btn--secondary" type="button" disabled={externalSearching || !query.trim()} onClick={() => void searchLrclib()}>{externalSearching ? 'LRCLIB 검색 중' : 'LRCLIB에서 찾기'}</button>
                 {searchNotice && <p className={`notice ${searchNotice.kind ?? ''}`} role="status">{searchNotice.text}</p>}
+                {providerInfo.length > 0 && <div className="result-list"><div className="result-heading">추가 곡 정보 · 가사 없음</div>{providerInfo.map((song, index) => <div className="result-row" key={`${song.source}-${index}`}><span className="result-main"><strong>{song.title}</strong><small>{song.artist} · {song.source}</small></span></div>)}</div>}
                 {externalResults.length > 0 && <div className="result-list"><div className="result-heading">LRCLIB 검색 결과 <span>{externalResults.length}</span></div>{externalResults.map((song) => <button className={`result-row ${activeSong?.id === song.id ? 'is-active' : ''}`} key={song.id} type="button" onClick={() => setActiveSong(song)}><span className="result-main"><strong>{song.title}</strong><small>가수 {displayPerson(song.artist)} · 앨범 {displayPerson(song.album)}</small></span><span className="result-meta">→</span></button>)}</div>}
                 {results.length > 0 && <div className="result-list" aria-live="polite"><div className="result-heading">검색 결과 <span>{results.length}</span></div>{results.map((song) => <button className={`result-row ${activeSong?.id === song.id ? 'is-active' : ''}`} key={song.id} type="button" onClick={() => setActiveSong(song)}><span className="result-main"><strong>{song.title}</strong><small>작사 {displayPerson(song.author)}</small></span><span className="result-meta" aria-hidden="true">→</span></button>)}</div>}
                 {activeSong && <article className="song-detail" aria-live="polite"><div className="detail-title"><div><p className="eyebrow">선택한 찬양</p><h3>{activeSong.title}</h3></div><button className="icon-button" onClick={() => setActiveSong(null)} aria-label="선택한 곡 닫기">×</button></div><dl className="song-meta"><div><dt>작사</dt><dd>{displayPerson(activeSong.author)}</dd></div><div><dt>작곡</dt><dd>{displayPerson(activeSong.composer)}</dd></div><div><dt>공연팀</dt><dd>{displayPerson(activeSong.artist)}</dd></div></dl><div className="lyrics-preview"><span>가사 미리보기</span><p>{activeSong.id < 0 ? activeSong.lyrics?.trim() : activeSong.lyrics?.trim().slice(0, 520)}{activeSong.id > 0 && (activeSong.lyrics?.length ?? 0) > 520 ? '…' : ''}</p></div>{activeSong.id < 0 && <p className="editor-hint">LRCLIB 제공 가사입니다. 곡과 가사를 확인하고 이용 권한이 있는 경우에 사용해 주세요. DB에는 저장되지 않습니다.</p>}<button className="btn btn--secondary add-button" onClick={() => addSelection(activeSong)}>제작 목록에 추가</button></article>}

@@ -74,6 +74,11 @@ class LocalWebIntegrationTest {
    .andExpect(status().isOk()).andExpect(jsonPath("$.data.slideIndex").value(1));
   mvc.perform(request("/ppt/batch","{\"songIds\":[-123]}" )).andExpect(status().isBadRequest());
  }
+ @Test void providersWithoutCredentialsAreReportedWithoutBlocking() throws Exception {
+  mvc.perform(request("/providers/search", "{\"title\":\"독립 테스트곡\"}"))
+   .andExpect(status().isOk()).andExpect(jsonPath("$.data.candidates.length()").value(0))
+   .andExpect(jsonPath("$.data.status.length()").value(2));
+ }
  @Test void singlePptAndImportValidation()throws Exception{
   mvc.perform(request("/ppt","{\"id\":"+id1+"}")).andExpect(status().isOk()).andExpect(content().contentType("application/vnd.openxmlformats-officedocument.presentationml.presentation"));
   mvc.perform(request("/batch-import","{\"files\":[]}")).andExpect(status().isBadRequest());
