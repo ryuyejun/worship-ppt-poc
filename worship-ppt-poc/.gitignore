@@ -21,3 +21,7 @@ frontend/*.tsbuildinfo
 *.pptx
 .env
 .env.*
+firebase/functions/node_modules/
+
+firebase/*-debug.log
+firebase/.firebase/
