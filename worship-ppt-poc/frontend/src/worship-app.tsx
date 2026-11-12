@@ -87,7 +87,7 @@ export function WorshipApp() {
     try {
       const stored = window.localStorage.getItem('yebit.recent-songs');
       const parsed: unknown = stored ? JSON.parse(stored) : [];
-      return Array.isArray(parsed) ? parsed.filter((song): song is RecentSong => song && Number.isInteger(song.id) && song.id > 0 && typeof song.title === 'string' && typeof song.selectedAt === 'number').slice(0, 12) : [];
+      return Array.isArray(parsed) ? parsed.filter((song): song is RecentSong => song && Number.isInteger(song.id) && song.id !== 0 && typeof song.title === 'string' && typeof song.selectedAt === 'number').slice(0, 12) : [];
     } catch {
       return [];
     }
@@ -136,10 +136,8 @@ export function WorshipApp() {
     }
     setEditorTab('songs');
     if (closeSearch) setSearchOpen(false);
-    if (song.id > 0) {
-      setRecentSongs((songs) => [{ id: song.id, title: song.title, artist: song.artist, selectedAt: Date.now() }, ...songs.filter((recent) => recent.id !== song.id)].slice(0, 12));
-      void loadSongArtwork(song);
-    }
+    setRecentSongs((songs) => [{ id: song.id, title: song.title, artist: song.artist, selectedAt: Date.now() }, ...songs.filter((recent) => recent.id !== song.id)].slice(0, 12));
+    void loadSongArtwork(song);
   }
 
   async function loadSongArtwork(song: Song) {

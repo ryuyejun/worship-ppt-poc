@@ -9,6 +9,7 @@ function fixture() {
   const db = new DatabaseSync(':memory:');
   db.exec(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
   db.exec(readFileSync(new URL('../migrations/0002-song-artwork-cache.sql', import.meta.url), 'utf8'));
+  db.exec(readFileSync(new URL('../migrations/0003-external-artwork-cache.sql', import.meta.url), 'utf8'));
   const song = db.prepare('INSERT INTO songs(id,title,normalized_title,lyrics,lyrics_status,category,hymn_number) VALUES(?,?,?,?,?,?,?)');
   song.run(1, '테스트 찬양', '테스트찬양', '[1절]\n창작 문장', 'USER_SUPPLIED', 'HYMN', 123);
   song.run(2, '가사 대기', '가사대기', null, 'PENDING', null, null);
@@ -79,5 +80,25 @@ test('Pixabay 이미지를 한 번 내려받아 D1에서 재사용하고 출처�
     assert.equal(second.data.available, true); assert.equal(count, 2);
     const image = await worker.fetch(new Request('https://example.test/song-artwork/image/1'),env);
     assert.deepEqual([...new Uint8Array(await image.arrayBuffer())], [1,2,3]);
+  } finally { globalThis.fetch=before; }
+});
+
+test('외부 곡의 사진을 별도 캐시에 저장하고 다시 조회한다', async () => {
+  const before = globalThis.fetch; let count = 0;
+  globalThis.fetch = async url => {
+    count++;
+    if (String(url).startsWith('https://pixabay.com/api/')) return Response.json({ hits: [{ webformatURL:'https://pixabay.com/get/photo.jpg', pageURL:'https://pixabay.com/photos/test/', user:'photographer' }] });
+    const image = new Response(new Uint8Array([4,5,6]), { headers: {'content-type':'image/jpeg'} });
+    Object.defineProperty(image, 'url', { value:'https://cdn.pixabay.com/test.jpg' });
+    return image;
+  };
+  try {
+    const env = { DB: fixture(), PIXABAY_API_KEY: 'test-key' };
+    const req = () => new Request('https://example.test/song-artwork/search', {method:'POST',body:JSON.stringify({songId:-123,title:'테스트 곡'})});
+    const first = await (await worker.fetch(req(),env)).json();
+    assert.equal(first.data.imageUrl, '/song-artwork/image/-123');
+    await worker.fetch(req(),env); assert.equal(count, 2);
+    const image = await worker.fetch(new Request('https://example.test/song-artwork/image/-123'),env);
+    assert.deepEqual([...new Uint8Array(await image.arrayBuffer())], [4,5,6]);
   } finally { globalThis.fetch=before; }
 });

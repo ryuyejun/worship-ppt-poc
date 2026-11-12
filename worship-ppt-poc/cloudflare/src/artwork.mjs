@@ -28,11 +28,14 @@ function responseFor(songId, cached) {
     : unavailable(songId);
 }
 
-export async function findArtwork(db, songId, apiKey) {
-  if (!Number.isSafeInteger(songId) || songId < 1) return unavailable(songId || 0);
-  const song = await db.prepare('SELECT title FROM songs WHERE id = ?').bind(songId).first();
+export async function findArtwork(db, songId, apiKey, externalTitle) {
+  if (!Number.isSafeInteger(songId) || songId === 0) return unavailable(songId || 0);
+  const external = songId < 0;
+  const title = typeof externalTitle === 'string' ? externalTitle.normalize('NFC').trim().slice(0, 100) : '';
+  const song = external ? (title ? { title } : null) : await db.prepare('SELECT title FROM songs WHERE id = ?').bind(songId).first();
+  const table = external ? 'external_song_artwork_cache' : 'song_artwork_cache';
   if (!song) return unavailable(songId);
-  const cached = await db.prepare('SELECT song_title, fetched_at, image_type, source_url, contributor FROM song_artwork_cache WHERE song_id = ?').bind(songId).first();
+  const cached = await db.prepare(`SELECT song_title, fetched_at, image_type, source_url, contributor FROM ${table} WHERE song_id = ?`).bind(songId).first();
   if (cached?.song_title === song.title && cached.image_type) return responseFor(songId, cached);
   if (cached?.song_title === song.title && Date.now() - Date.parse(cached.fetched_at) < CACHE_MILLISECONDS) return unavailable(songId);
   if (!apiKey) return unavailable(songId);
@@ -54,7 +57,7 @@ export async function findArtwork(db, songId, apiKey) {
       if (image) { type = mime; source = first.pageURL; contributor = String(first.user || '').slice(0, 200); }
     }
   }
-  await db.prepare(`INSERT INTO song_artwork_cache(song_id,song_title,fetched_at,search_response,image_data,image_type,source_url,contributor)
+  await db.prepare(`INSERT INTO ${table}(song_id,song_title,fetched_at,search_response,image_data,image_type,source_url,contributor)
     VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(song_id) DO UPDATE SET song_title=excluded.song_title, fetched_at=excluded.fetched_at,
     search_response=excluded.search_response, image_data=excluded.image_data, image_type=excluded.image_type,
     source_url=excluded.source_url, contributor=excluded.contributor`)
@@ -63,8 +66,9 @@ export async function findArtwork(db, songId, apiKey) {
 }
 
 export async function getArtworkImage(db, songId) {
-  if (!Number.isSafeInteger(songId) || songId < 1) return null;
-  const row = await db.prepare('SELECT image_data, image_type FROM song_artwork_cache WHERE song_id = ? AND image_data IS NOT NULL').bind(songId).first();
+  if (!Number.isSafeInteger(songId) || songId === 0) return null;
+  const table = songId < 0 ? 'external_song_artwork_cache' : 'song_artwork_cache';
+  const row = await db.prepare(`SELECT image_data, image_type FROM ${table} WHERE song_id = ? AND image_data IS NOT NULL`).bind(songId).first();
   if (!row || !['image/jpeg','image/png','image/webp'].includes(row.image_type)) return null;
   return { bytes: new Uint8Array(row.image_data), type: row.image_type };
 }

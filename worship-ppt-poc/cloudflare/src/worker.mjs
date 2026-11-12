@@ -32,7 +32,7 @@ export default {
       try { await env.DB.prepare('SELECT 1 AS ok').first(); return json({ status: 'ok', database: 'connected' }); }
       catch { return json({ status: 'unavailable', database: 'unavailable' }, 503); }
     }
-    const imageMatch = path.match(/^\/song-artwork\/image\/(\d+)$/);
+    const imageMatch = path.match(/^\/song-artwork\/image\/(-?\d+)$/);
     if (imageMatch && request.method === 'GET') {
       try {
         const image = await getArtworkImage(env.DB, Number(imageMatch[1]));
@@ -76,7 +76,7 @@ export default {
         return ok(results);
       }
       if (path === '/providers/search') return ok({ candidates: [], status: ['추가 제공처는 아직 연결되지 않았습니다'] });
-      return ok(await findArtwork(env.DB, input?.songId, env.PIXABAY_API_KEY));
+      return ok(await findArtwork(env.DB, input?.songId, env.PIXABAY_API_KEY, input?.title));
     } catch (error) {
       if (error instanceof TypeError) return fail('곡 제목을 확인해 주세요.', 400);
       return fail('곡 조회 중 오류가 발생했습니다.', 500);
