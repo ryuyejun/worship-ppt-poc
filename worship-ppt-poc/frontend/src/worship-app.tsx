@@ -597,9 +597,9 @@ export function WorshipApp() {
               </div> : null}
               <div className={`editor-control-group trend-panel${editorTab === 'trending' ? ' is-visible' : ' is-preloaded'}`} aria-hidden={editorTab !== 'trending'}>
                 <div className="editor-heading"><h2>트렌드</h2></div>
-                <p className="trend-source-note">CCM 랭킹 주간 순위 · YouTube 조회 변화 등을 기준으로 집계됩니다. 교회별 실제 선호와 다를 수 있습니다.</p>
-                <iframe key={trendReloadKey} className="trend-chart-frame" src="https://www.ccmranking.com/charts" title="CCM 랭킹 최신 찬양 차트" referrerPolicy="no-referrer" />
-                <a className="trend-source-link" href="https://www.ccmranking.com/charts" target="_blank" rel="noreferrer">차트가 보이지 않으면 CCM 랭킹에서 확인하기 ↗</a>
+                <p className="trend-source-note">KCCM 주간 Top 50 · 국내 음원 서비스 5곳과 YouTube 순위를 종합합니다. 교회별 실제 선호와 다를 수 있습니다.</p>
+                <iframe key={trendReloadKey} className="trend-chart-frame" src="https://kccm.app/chart" title="KCCM 최신 찬양 주간 차트" referrerPolicy="no-referrer" />
+                <a className="trend-source-link" href="https://kccm.app/chart" target="_blank" rel="noreferrer">차트가 보이지 않으면 KCCM에서 확인하기 ↗</a>
               </div>
             </div>
           </aside>
