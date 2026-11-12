@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, cloudflareMode } from './api';
 import type { Song, SongRequest } from './types';
+import { collectSlides, renderSlide, type Slide, type SlideStyle } from './presentation';
 
 type Notice = { text: string; kind?: 'error' | 'success' } | null;
 type RecentSong = { id: number; title: string; artist: string | null; selectedAt: number; artworkUrl?: string; artworkSourceUrl?: string; artworkContributor?: string };
@@ -105,6 +106,8 @@ export function WorshipApp() {
   const [presentationTitle, setPresentationTitle] = useState('제목없는 디자인');
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewIndex, setPreviewIndex] = useState(0);
+  const [prepared, setPrepared] = useState<{ slides: Slide[]; style: SlideStyle; thumbnails: string[] } | null>(null);
+  const previewCache = useRef(new Map<number, string>());
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState('');
   const [previewRetry, setPreviewRetry] = useState(0);
@@ -192,36 +195,47 @@ export function WorshipApp() {
   }, [existingPpt]);
 
   useEffect(() => {
-    if (!selected.length) {
-      setPreview(null); setPreviewLoading(false); setPreviewError('');
-      return;
-    }
-    if (!validStyle) {
-      setPreview(null); setPreviewLoading(false); setPreviewError('글꼴과 글자 크기, 줄 수를 확인해 주세요.');
-      return;
-    }
-    if (existingPpt && (!existingPpt.name.toLowerCase().endsWith('.pptx') || existingPpt.size > 20_000_000)) {
-      setPreview(null); setPreviewLoading(false); setPreviewError('20MB 이하의 PPTX 파일을 선택해 주세요.');
-      return;
-    }
-    if (existingPptError) { setPreview(null); setPreviewLoading(false); setPreviewError(existingPptError); return; }
-    if (existingPpt && !existingPptData) { setPreview(null); setPreviewLoading(true); return; }
     const controller = new AbortController();
+    setPrepared(null); setPreview(null); previewCache.current.clear();
+    if (!selected.length) { setPreviewLoading(false); setPreviewError(''); return; }
+    if (!validStyle) { setPreviewLoading(false); setPreviewError('글꼴과 글자 크기, 줄 수를 확인해 주세요.'); return; }
+    if (existingPpt && (!existingPpt.name.toLowerCase().endsWith('.pptx') || existingPpt.size > 20_000_000)) {
+      setPreviewLoading(false); setPreviewError('20MB 이하의 PPTX 파일을 선택해 주세요.'); return;
+    }
+    if (existingPptError) { setPreviewLoading(false); setPreviewError(existingPptError); return; }
+    if (existingPpt && !existingPptData) { setPreviewLoading(true); return; }
     setPreviewLoading(true); setPreviewError('');
     const timer = window.setTimeout(async () => {
       try {
-        const result = await api<Preview>('/ppt/preview', { presentation: presentationPayload(), slideIndex: previewIndex }, controller.signal);
+        const input = presentationPayload();
+        const slides = await collectSlides(input, controller.signal);
+        const thumbnails = await Promise.all(slides.map((slide) => renderSlide(slide, input.style, 320)));
         if (controller.signal.aborted) return;
-        setPreview(result.data);
-        if (result.data.slideIndex !== previewIndex) setPreviewIndex(result.data.slideIndex);
+        setPrepared({ slides, style: input.style, thumbnails });
+        setPreviewIndex((index) => Math.min(index, slides.length - 1));
       } catch (error) {
-        if (!controller.signal.aborted) { setPreview(null); setPreviewError(error instanceof Error ? error.message : '미리보기를 불러오지 못했습니다.'); }
+        if (!controller.signal.aborted) setPreviewError(error instanceof Error ? error.message : '미리보기를 불러오지 못했습니다.');
       } finally {
         if (!controller.signal.aborted) setPreviewLoading(false);
       }
-    }, 400);
+    }, 200);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [selected, pptStyle, backgroundImage, existingPpt, existingPptData, existingPptError, previewIndex, validStyle, previewRetry]);
+  }, [selected, pptStyle, backgroundImage, existingPpt, existingPptData, existingPptError, validStyle, previewRetry]);
+
+  useEffect(() => {
+    if (!prepared) return;
+    let cancelled = false;
+    const index = Math.min(previewIndex, prepared.slides.length - 1);
+    const cached = previewCache.current.get(index);
+    setPreview({ imageBase64: cached ?? prepared.thumbnails[index], slideIndex: index, slideCount: prepared.slides.length });
+    if (!cached) void renderSlide(prepared.slides[index], prepared.style).then((imageBase64) => {
+      if (!cancelled) {
+        previewCache.current.set(index, imageBase64);
+        setPreview({ imageBase64, slideIndex: index, slideCount: prepared.slides.length });
+      }
+    }).catch(() => { /* 축소 미리보기는 계속 표시합니다. */ });
+    return () => { cancelled = true; };
+  }, [prepared, previewIndex]);
 
   useEffect(() => {
     function syncPage() {
@@ -549,7 +563,7 @@ export function WorshipApp() {
               </div>
             </div>
             <div className="editor-filmstrip" aria-label="슬라이드 페이지">
-              {Array.from({ length: Math.max(preview?.slideCount ?? 0, 6) }, (_, slide) => <button className={`filmstrip-page ${preview?.slideIndex === slide ? 'is-active' : ''}`} type="button" key={slide} onClick={() => setPreviewIndex(slide)} disabled={!preview || slide >= preview.slideCount} aria-label={`${slide + 1}번 슬라이드 미리보기`} aria-current={preview?.slideIndex === slide ? 'page' : undefined}><span className="filmstrip-canvas">{preview?.slideIndex === slide && <img src={`data:image/png;base64,${preview.imageBase64}`} alt="" />}</span><span className="filmstrip-number">{slide + 1}</span></button>)}
+              {Array.from({ length: Math.max(preview?.slideCount ?? 0, 6) }, (_, slide) => <button className={`filmstrip-page ${preview?.slideIndex === slide ? 'is-active' : ''}`} type="button" key={slide} onClick={() => setPreviewIndex(slide)} disabled={!preview || slide >= preview.slideCount} aria-label={`${slide + 1}번 슬라이드 미리보기`} aria-current={preview?.slideIndex === slide ? 'page' : undefined}><span className="filmstrip-canvas">{prepared?.thumbnails[slide] && <img src={`data:image/png;base64,${prepared.thumbnails[slide]}`} alt="" />}</span><span className="filmstrip-number">{slide + 1}</span></button>)}
             </div>
           </section>
           <aside className="editor-inspector" aria-label="슬라이드 편집">

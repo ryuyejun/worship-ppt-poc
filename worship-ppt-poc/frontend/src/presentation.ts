@@ -60,9 +60,10 @@ export async function makePresentation(slides: Slide[], style: SlideStyle): Prom
   return data;
 }
 
-export async function renderSlide(slide: Slide, style: SlideStyle): Promise<string> {
-  const canvas = document.createElement('canvas'); canvas.width = 1280; canvas.height = 720;
+export async function renderSlide(slide: Slide, style: SlideStyle, width = 1280): Promise<string> {
+  const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = Math.round(width * 9 / 16);
   const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('미리보기를 만들 수 없습니다.');
+  ctx.scale(canvas.width / 1280, canvas.height / 720);
   ctx.fillStyle = style.backgroundColor; ctx.fillRect(0, 0, 1280, 720);
   if (style.backgroundImageBase64 && style.backgroundImageType) {
     const image = new Image(); image.src = `data:image/${style.backgroundImageType === 'PNG' ? 'png' : 'jpeg'};base64,${style.backgroundImageBase64}`;
