@@ -204,8 +204,7 @@ export function WorshipApp() {
 
   useEffect(() => {
     const controller = new AbortController();
-    setPrepared(null); setPreview(null); previewCache.current.clear();
-    if (!selected.length) { setPreviewLoading(false); setPreviewError(''); return; }
+    if (!selected.length) { setPrepared(null); setPreview(null); previewCache.current.clear(); setPreviewLoading(false); setPreviewError(''); return; }
     if (!validStyle) { setPreviewLoading(false); setPreviewError('글꼴과 글자 크기, 줄 수를 확인해 주세요.'); return; }
     if (existingPpt && (!existingPpt.name.toLowerCase().endsWith('.pptx') || existingPpt.size > 20_000_000)) {
       setPreviewLoading(false); setPreviewError('20MB 이하의 PPTX 파일을 선택해 주세요.'); return;
@@ -218,16 +217,21 @@ export function WorshipApp() {
         const input = presentationPayload();
         const slides = await collectSlides(input, controller.signal);
         const size = input.slideSize ?? {width:1280,height:720};
+        const index = Math.min(previewIndex, slides.length - 1);
+        const mainImage = await renderSlide(slides[index], input.style, 1280, size);
+        if (controller.signal.aborted) return;
+        previewCache.current.set(index, mainImage);
+        setPreview({ imageBase64: mainImage, slideIndex: index, slideCount: slides.length });
+        setPreviewIndex(index);
         const thumbnails = await Promise.all(slides.map((slide) => renderSlide(slide, input.style, 320, size)));
         if (controller.signal.aborted) return;
         setPrepared({ slides, style: input.style, thumbnails, slideSize: size });
-        setPreviewIndex((index) => Math.min(index, slides.length - 1));
       } catch (error) {
         if (!controller.signal.aborted) setPreviewError(error instanceof Error ? error.message : '미리보기를 불러오지 못했습니다.');
       } finally {
         if (!controller.signal.aborted) setPreviewLoading(false);
       }
-    }, 200);
+    }, 0);
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [selected, pptStyle, backgroundImage, slideSize, existingPpt, existingPptData, existingPptError, validStyle, previewRetry]);
 
@@ -572,7 +576,7 @@ export function WorshipApp() {
             <div className="editor-toolbar"><label className="editor-document-title"><span className="visually-hidden">프레젠테이션 제목</span><input value={presentationTitle} onChange={(event) => setPresentationTitle(event.target.value)} maxLength={80} /><img src="/assets/figma/pencil.svg" alt="" /></label><div className="editor-size-control"><button className="editor-page-count" type="button" aria-expanded={sizeOpen} onClick={() => setSizeOpen((open) => !open)}>{slideSize.width} × {slideSize.height}</button>{sizeOpen && <div className="editor-size-menu"><div className="editor-size-presets">{[{label:'16:9',width:1280,height:720},{label:'16:10',width:1280,height:800},{label:'4:3',width:1280,height:960},{label:'1:1',width:960,height:960}].map((preset) => <button type="button" key={preset.label} aria-pressed={slideSize.width===preset.width&&slideSize.height===preset.height} onClick={() => setSlideSize({width:preset.width,height:preset.height})}>{preset.label}</button>)}</div><div className="editor-size-custom"><label>가로<input type="number" min="320" max="3840" value={slideSize.width} onChange={(event) => setSlideSize((size) => ({...size,width:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label><span>×</span><label>세로<input type="number" min="320" max="3840" value={slideSize.height} onChange={(event) => setSlideSize((size) => ({...size,height:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label></div></div>}</div></div>
             <div className="editor-stage">
               <div className={`editor-canvas ${preview && !previewLoading && !previewError ? 'has-preview' : ''}`} style={{aspectRatio:`${slideSize.width} / ${slideSize.height}`}} aria-live="polite">
-                {preview && !previewLoading && !previewError ? <img src={`data:image/png;base64,${preview.imageBase64}`} alt={`${preview.slideIndex + 1}번째 슬라이드 미리보기`} /> : previewLoading ? <div className="editor-canvas-message"><span className="preview-spinner" aria-hidden="true" /><strong>슬라이드를 불러오는 중</strong></div> : previewError ? <div className="editor-canvas-message"><strong>미리보기를 열 수 없습니다</strong><span>{previewError}</span><button type="button" className="preview-retry" onClick={() => setPreviewRetry((value) => value + 1)}>다시 시도</button></div> : null}
+                {preview && !previewError ? <img src={`data:image/png;base64,${preview.imageBase64}`} alt={`${preview.slideIndex + 1}번째 슬라이드 미리보기`} /> : previewLoading ? <div className="editor-canvas-message"><span className="preview-spinner" aria-hidden="true" /><strong>슬라이드를 불러오는 중</strong></div> : previewError ? <div className="editor-canvas-message"><strong>미리보기를 열 수 없습니다</strong><span>{previewError}</span><button type="button" className="preview-retry" onClick={() => setPreviewRetry((value) => value + 1)}>다시 시도</button></div> : null}
               </div>
             </div>
             <div className="editor-filmstrip" aria-label="슬라이드 페이지">
