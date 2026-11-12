@@ -434,3 +434,4 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
 .font-options { position:absolute; z-index:8; top:100%; right:0; left:0; display:grid; max-height:220px; overflow:auto; margin-top:5px; border:1px solid rgba(255,255,255,.9); border-radius:10px; background:rgba(255,255,255,.82); padding:5px; -webkit-backdrop-filter:blur(22px) saturate(180%); backdrop-filter:blur(22px) saturate(180%); box-shadow:0 10px 28px rgba(55,72,94,.16); }
 .font-options button { border:0; border-radius:6px; background:transparent; padding:9px 10px; color:#28343d; text-align:left; cursor:pointer; }
 .font-options button:hover,.font-options button[aria-selected="true"] { background:rgba(222,239,249,.8); }
+.inspector-controls .font-picker .font-search-glass input:not([type="color"]) { height:auto; border:0; border-radius:0; background:transparent; box-shadow:none; padding:0; }
