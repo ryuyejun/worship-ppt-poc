@@ -3,6 +3,7 @@ import { api } from './api';
 import type { Song, SongRequest } from './types';
 
 type Notice = { text: string; kind?: 'error' | 'success' } | null;
+type RecentSong = { id: number; title: string; artist: string | null; selectedAt: number };
 type PptStyle = {
   backgroundColor: string; textColor: string; fontFamily: string; fontSize: number;
   alignment: 'LEFT' | 'CENTER' | 'RIGHT'; linesPerSlide: number; bold: boolean;
@@ -19,6 +20,22 @@ const templateStyles: Record<string, PptStyle> = {
 
 function displayPerson(value?: string | null) {
   return value?.trim() || '정보 없음';
+}
+
+function trackSearchGlassReflection(event: React.PointerEvent<HTMLDivElement>) {
+  if (event.pointerType !== 'mouse' || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const glass = event.currentTarget.querySelector<HTMLElement>('.editor-search-widget');
+  if (!glass) return;
+  const bounds = glass.getBoundingClientRect();
+  glass.style.setProperty('--glass-x', `${((event.clientX - bounds.left) / bounds.width) * 100}%`);
+  glass.style.setProperty('--glass-y', `${((event.clientY - bounds.top) / bounds.height) * 100}%`);
+}
+
+function resetSearchGlassReflection(event: React.PointerEvent<HTMLDivElement>) {
+  if (event.pointerType !== 'mouse') return;
+  const glass = event.currentTarget.querySelector<HTMLElement>('.editor-search-widget');
+  glass?.style.setProperty('--glass-x', '50%');
+  glass?.style.setProperty('--glass-y', '0%');
 }
 
 function downloadPpt(blob: Blob, name: string) {
@@ -39,6 +56,7 @@ export function WorshipApp() {
   const [searchOpen, setSearchOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchWidgetRef = useRef<HTMLDivElement>(null);
+  const selectedQueueRef = useRef<HTMLElement>(null);
   const [libraryQuery, setLibraryQuery] = useState('');
   const [results, setResults] = useState<Song[]>([]);
   const [selected, setSelected] = useState<Song[]>([]);
@@ -63,7 +81,25 @@ export function WorshipApp() {
   const [backgroundImage, setBackgroundImage] = useState<{ dataUrl: string; type: 'PNG' | 'JPEG'; name: string } | null>(null);
   const [imageInputKey, setImageInputKey] = useState(0);
   const [libraryError, setLibraryError] = useState('');
-  const [editorTab, setEditorTab] = useState<'songs' | 'selected'>('songs');
+  const [editorTab, setEditorTab] = useState<'songs' | 'favorites' | 'trending'>('songs');
+  const [recentSongs, setRecentSongs] = useState<RecentSong[]>(() => {
+    try {
+      const stored = window.localStorage.getItem('yebit.recent-songs');
+      const parsed: unknown = stored ? JSON.parse(stored) : [];
+      return Array.isArray(parsed) ? parsed.filter((song): song is RecentSong => song && Number.isInteger(song.id) && song.id > 0 && typeof song.title === 'string' && typeof song.selectedAt === 'number').slice(0, 12) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [favoriteIds, setFavoriteIds] = useState<number[]>(() => {
+    try {
+      const stored = window.localStorage.getItem('yebit.favorite-song-ids');
+      const parsed: unknown = stored ? JSON.parse(stored) : [];
+      return Array.isArray(parsed) ? parsed.filter((id): id is number => Number.isInteger(id) && id > 0) : [];
+    } catch {
+      return [];
+    }
+  });
   const [presentationTitle, setPresentationTitle] = useState('제목없는 디자인');
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewIndex, setPreviewIndex] = useState(0);
@@ -72,6 +108,37 @@ export function WorshipApp() {
   const [previewRetry, setPreviewRetry] = useState(0);
 
   const validStyle = Boolean(pptStyle.fontFamily.trim()) && pptStyle.fontFamily.length <= 80 && Number.isInteger(pptStyle.fontSize) && pptStyle.fontSize >= 16 && pptStyle.fontSize <= 100 && Number.isInteger(pptStyle.linesPerSlide) && pptStyle.linesPerSlide >= 1 && pptStyle.linesPerSlide <= 6;
+  const favoriteSongs = readySongs.filter((song) => favoriteIds.includes(song.id));
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('yebit.favorite-song-ids', JSON.stringify(favoriteIds));
+    } catch {
+      // 즐겨찾기는 저장소를 사용할 수 없는 경우 현재 화면에서만 유지합니다.
+    }
+  }, [favoriteIds]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('yebit.recent-songs', JSON.stringify(recentSongs));
+    } catch {
+      // 최근 선택은 저장소를 사용할 수 없는 경우 현재 화면에서만 유지합니다.
+    }
+  }, [recentSongs]);
+
+  function selectSong(song: Song, closeSearch = true) {
+    setActiveSong(song);
+    setEditorTab('songs');
+    if (closeSearch) setSearchOpen(false);
+    if (song.id > 0) {
+      setRecentSongs((songs) => [{ id: song.id, title: song.title, artist: song.artist, selectedAt: Date.now() }, ...songs.filter((recent) => recent.id !== song.id)].slice(0, 12));
+    }
+  }
+
+  function toggleFavorite(song: Song) {
+    if (song.id <= 0) return;
+    setFavoriteIds((ids) => ids.includes(song.id) ? ids.filter((id) => id !== song.id) : [...ids, song.id]);
+  }
 
   function presentationPayload(): PptPayload {
     return {
@@ -234,7 +301,7 @@ export function WorshipApp() {
         const local = await api<Song[]>('/search', { title: query.trim() });
         setResults(local.data);
         messages.push(`내 DB: 가사 ${local.data.length}곡`);
-        if (local.data.length === 1) setActiveSong(local.data[0]);
+        if (local.data.length === 1) selectSong(local.data[0], false);
         if (!local.data.length) { messages.push('곡 추가 대기열에 기록했습니다'); await loadRequests(); }
       } catch { messages.push('내 DB: 조회 실패'); }
       setSearchNotice({ text: messages.join(' · ') });
@@ -388,37 +455,44 @@ export function WorshipApp() {
               <img src="/assets/figma/editor-logo.png" width="42" height="42" alt="" />
               <span><strong>Yebit</strong><small>찬양 라이브러리</small></span>
             </a>
-            <div ref={searchWidgetRef} className={`editor-search-widget${searchOpen ? ' is-active' : ''}${query.trim() ? ' has-query' : ''}`}>
-              {!searchOpen ? <button className="editor-search-off" type="button" onClick={() => setSearchOpen(true)} aria-label="곡 검색 열기"><img src="/assets/figma/search.svg" alt="" /><span>search to song...</span></button> : <>
+            <div ref={searchWidgetRef} className="editor-search-shell" onPointerMove={trackSearchGlassReflection} onPointerLeave={resetSearchGlassReflection}>
+              {!searchOpen ? <button className="editor-search-widget" type="button" aria-label="곡 제목 또는 찬송가 번호 검색" onClick={() => setSearchOpen(true)}>
+                <span className="editor-search-off"><img src="/assets/figma/search.svg" alt="" /><span>곡 제목 또는 찬송가 번호</span></span>
+              </button> : <div className={`editor-search-widget is-active${query.trim() ? ' has-query' : ''}`}>
                 <form className="editor-search" onSubmit={searchSongs}>
                   <label className="visually-hidden" htmlFor="worship-song-search">곡 제목 또는 찬송가 번호</label>
                   <span className="editor-search-input"><img src="/assets/figma/search.svg" alt="" /><input id="worship-song-search" ref={searchInputRef} autoComplete="off" value={query} onChange={(event) => { setQuery(event.target.value); setSearchNotice(null); setResults([]); setExternalResults([]); setProviderInfo([]); }} placeholder="곡 제목 또는 찬송가 번호" /></span>
                   <button className="visually-hidden" type="submit" disabled={searching || !query.trim()}>검색</button>
                 </form>
                 {query.trim() && <div className="editor-search-results" aria-live="polite">
-                  {liveSongMatches.length > 0 && <div className="search-result-group"><span>내 곡 목록</span>{liveSongMatches.map((song) => <button className="search-result-row" key={song.id} type="button" onClick={() => { setActiveSong(song); setSearchOpen(false); }}><strong>{song.title}</strong><small>{displayPerson(song.artist)} · 가사 저장됨</small></button>)}</div>}
+                  {liveSongMatches.length > 0 && <div className="search-result-group"><span>내 곡 목록</span>{liveSongMatches.map((song) => <div className="editor-favorite-row" key={song.id}><button className="search-result-row" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>{displayPerson(song.artist)} · 가사 저장됨</small></button><button className={`favorite-toggle${favoriteIds.includes(song.id) ? ' is-favorite' : ''}`} type="button" onClick={() => toggleFavorite(song)} aria-label={favoriteIds.includes(song.id) ? `${song.title} 즐겨찾기 해제` : `${song.title} 즐겨찾기 추가`}>{favoriteIds.includes(song.id) ? '★' : '☆'}</button></div>)}</div>}
                   {searching && <p className="search-result-hint">곡을 찾고 있습니다…</p>}
                   {!searching && !searchNotice && <p className="search-result-hint">Enter를 누르면 전체 검색을 시작합니다.</p>}
                   {searchNotice && <p className={`search-result-hint ${searchNotice.kind ?? ''}`}>{searchNotice.text}</p>}
                   {providerInfo.length > 0 && <div className="search-result-group"><span>추가 곡 정보 · 가사 없음</span>{providerInfo.map((song, index) => <div className="search-result-row" key={`${song.source}-${index}`}><strong>{song.title}</strong><small>{song.artist} · {song.source}</small></div>)}</div>}
-                  {externalResults.length > 0 && <div className="search-result-group"><span>LRCLIB 검색 결과 · {externalResults.length}</span>{externalResults.map((song) => <button className="search-result-row" key={song.id} type="button" onClick={() => { setActiveSong(song); setSearchOpen(false); }}><strong>{song.title}</strong><small>{displayPerson(song.artist)} · {displayPerson(song.album)}</small></button>)}</div>}
-                  {results.length > 0 && <div className="search-result-group"><span>내 곡 목록 · {results.length}</span>{results.map((song) => <button className="search-result-row" key={song.id} type="button" onClick={() => { setActiveSong(song); setSearchOpen(false); }}><strong>{song.title}</strong><small>작사 {displayPerson(song.author)}</small></button>)}</div>}
+                  {externalResults.length > 0 && <div className="search-result-group"><span>LRCLIB 검색 결과 · {externalResults.length}</span>{externalResults.map((song) => <button className="search-result-row" key={song.id} type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>{displayPerson(song.artist)} · {displayPerson(song.album)}</small></button>)}</div>}
+                  {results.length > 0 && <div className="search-result-group"><span>내 곡 목록 · {results.length}</span>{results.map((song) => <div className="editor-favorite-row" key={song.id}><button className="search-result-row" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>작사 {displayPerson(song.author)}</small></button><button className={`favorite-toggle${favoriteIds.includes(song.id) ? ' is-favorite' : ''}`} type="button" onClick={() => toggleFavorite(song)} aria-label={favoriteIds.includes(song.id) ? `${song.title} 즐겨찾기 해제` : `${song.title} 즐겨찾기 추가`}>{favoriteIds.includes(song.id) ? '★' : '☆'}</button></div>)}</div>}
                 </div>}
-              </>}
+              </div>}
             </div>
-            <span className={`editor-connection ${libraryError ? 'is-error' : ''}`}>{loadingSongs ? '연결 중' : libraryError ? '서버 연결 필요' : `${readySongs.length}곡`}</span>
-            <div className="editor-tabs" role="group" aria-label="곡 목록">
-              <button type="button" aria-pressed={editorTab === 'songs'} onClick={() => setEditorTab('songs')}>곡 검색</button>
-              <button type="button" aria-pressed={editorTab === 'selected'} onClick={() => setEditorTab('selected')}>제작 목록 <span>{selected.length}</span></button>
+            <div className="editor-tabs" role="group" aria-label="곡 라이브러리">
+              <button type="button" aria-pressed={editorTab === 'songs'} onClick={() => setEditorTab('songs')}>최근</button>
+              <button type="button" aria-pressed={editorTab === 'favorites'} onClick={() => setEditorTab('favorites')}>즐겨찾기</button>
+              <button type="button" aria-pressed={editorTab === 'trending'} onClick={() => setEditorTab('trending')}>트렌드</button>
             </div>
             <div className="editor-controls">
               {editorTab === 'songs' ? <div className="editor-control-group">
-                {activeSong && <article className="song-detail" aria-live="polite"><div className="detail-title"><div><p className="eyebrow">선택한 찬양</p><h3>{activeSong.title}</h3></div><button className="icon-button" onClick={() => setActiveSong(null)} aria-label="선택한 곡 닫기">×</button></div><dl className="song-meta"><div><dt>작사</dt><dd>{displayPerson(activeSong.author)}</dd></div><div><dt>작곡</dt><dd>{displayPerson(activeSong.composer)}</dd></div><div><dt>공연팀</dt><dd>{displayPerson(activeSong.artist)}</dd></div></dl><div className="lyrics-preview"><span>가사 미리보기</span><p>{activeSong.id < 0 ? activeSong.lyrics?.trim() : activeSong.lyrics?.trim().slice(0, 520)}{activeSong.id > 0 && (activeSong.lyrics?.length ?? 0) > 520 ? '…' : ''}</p></div>{activeSong.id < 0 && <p className="editor-hint">LRCLIB 제공 가사입니다. 곡과 가사를 확인하고 이용 권한이 있는 경우에 사용해 주세요. DB에는 저장되지 않습니다.</p>}<button className="btn btn--secondary add-button" onClick={() => addSelection(activeSong)}>제작 목록에 추가</button></article>}
-                {providerInfo.length === 0 && externalResults.length === 0 && results.length === 0 && !searching && !loadingSongs && !libraryError && <div className="editor-library-empty"><strong>찬양을 검색해 보세요</strong><span>제목이나 찬송가 번호로 찾을 수 있습니다.</span></div>}
-                {libraryError && !searching && <div className="editor-library-empty is-error"><strong>서버에 연결할 수 없습니다</strong><span>곡 검색과 미리보기를 사용하려면 백엔드 서버를 실행해 주세요.</span></div>}
+                <section className="recent-song-section" aria-label="최근 선택한 곡">
+                  <div className="editor-heading"><h2>최근 선택한 곡</h2><span>{recentSongs.length}곡</span></div>
+                  {recentSongs.length ? <div className="recent-song-list">{recentSongs.slice(0, 2).map((recent) => <button className="recent-song-card" key={recent.id} type="button" onClick={() => { const song = readySongs.find((item) => item.id === recent.id) ?? allSongs.find((item) => item.id === recent.id); if (song) selectSong(song); else { setQuery(recent.title); setSearchOpen(true); } }}><img className="recent-song-card__image" src="/assets/figma/recent-thumbnail.png" alt="" /><span className="recent-song-card__glass"><strong>{recent.title}</strong><small>최근 선택 · {new Date(recent.selectedAt).toLocaleDateString('ko-KR')}</small></span></button>)}</div> : <div className="recent-song-list"><div className="recent-song-card recent-song-card--empty"><img className="recent-song-card__image" src="/assets/figma/recent-thumbnail.png" alt="" /><span className="recent-song-card__glass"><strong>최근 선택한 곡</strong><small>곡을 검색하고 선택하면 여기에 표시됩니다</small></span></div></div>}
+                </section>
+                {activeSong && <article className="song-detail" aria-live="polite"><div className="detail-title"><div><p className="eyebrow">선택한 찬양</p><h3>{activeSong.title}</h3></div><div className="detail-actions">{activeSong.id > 0 && <button className={`favorite-toggle${favoriteIds.includes(activeSong.id) ? ' is-favorite' : ''}`} type="button" onClick={() => toggleFavorite(activeSong)} aria-label={favoriteIds.includes(activeSong.id) ? '즐겨찾기 해제' : '즐겨찾기 추가'}>{favoriteIds.includes(activeSong.id) ? '★' : '☆'}</button>}<button className="icon-button" onClick={() => setActiveSong(null)} aria-label="선택한 곡 닫기">×</button></div></div><dl className="song-meta"><div><dt>작사</dt><dd>{displayPerson(activeSong.author)}</dd></div><div><dt>작곡</dt><dd>{displayPerson(activeSong.composer)}</dd></div><div><dt>공연팀</dt><dd>{displayPerson(activeSong.artist)}</dd></div></dl><div className="lyrics-preview"><span>가사 미리보기</span><p>{activeSong.id < 0 ? activeSong.lyrics?.trim() : activeSong.lyrics?.trim().slice(0, 520)}{activeSong.id > 0 && (activeSong.lyrics?.length ?? 0) > 520 ? '…' : ''}</p></div>{activeSong.id < 0 && <p className="editor-hint">LRCLIB 제공 가사입니다. 곡과 가사를 확인하고 이용 권한이 있는 경우에 사용해 주세요. DB에는 저장되지 않습니다.</p>}<button className="btn btn--secondary add-button" onClick={() => addSelection(activeSong)}>제작 목록에 추가</button></article>}
+                {selected.length > 0 && <section ref={selectedQueueRef} className="editor-selected-queue" aria-labelledby="editor-selected-title"><div className="editor-heading"><h2 id="editor-selected-title">제작 목록</h2><span>{selected.length}곡</span></div><ol className="selected-list">{selected.map((song, index) => <li key={song.id}><span className="selected-index">{String(index + 1).padStart(2, '0')}</span><span className="selected-song"><strong>{song.title}</strong><small>{displayPerson(song.author)}</small></span><div className="selected-actions"><button type="button" onClick={() => moveSong(index, -1)} disabled={index === 0} aria-label={`${song.title} 위로`}>↑</button><button type="button" onClick={() => moveSong(index, 1)} disabled={index === selected.length - 1} aria-label={`${song.title} 아래로`}>↓</button><button type="button" onClick={() => setSelected((items) => items.filter((item) => item.id !== song.id))} aria-label={`${song.title} 제거`}>×</button></div></li>)}</ol></section>}
+              </div> : editorTab === 'favorites' ? <div className="editor-control-group">
+                <div className="editor-heading"><h2>즐겨찾기</h2><span>{favoriteSongs.length}곡</span></div>
+                {loadingSongs ? <div className="editor-library-empty"><strong>곡 목록을 확인하고 있습니다</strong></div> : !libraryError && (favoriteSongs.length === 0 ? <div className="editor-library-empty"><strong>즐겨찾는 곡이 없습니다</strong><span>곡 검색 결과에서 별표를 눌러 추가하세요.</span></div> : <div className="editor-favorite-list">{favoriteSongs.map((song) => <div className="editor-favorite-row" key={song.id}><button className="search-result-row" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>{displayPerson(song.artist)} · {song.category?.toUpperCase() === 'HYMN' && song.hymnNumber ? `새찬송가 ${song.hymnNumber}장` : '가사 저장됨'}</small></button><button className="favorite-toggle is-favorite" type="button" onClick={() => toggleFavorite(song)} aria-label={`${song.title} 즐겨찾기 해제`}>★</button></div>)}</div>)}
               </div> : <div className="editor-control-group">
-                <div className="editor-heading"><h2>제작 목록</h2><span>{selected.length}곡 선택</span></div>
-                {selected.length === 0 ? <p className="editor-hint">곡 검색에서 찬양을 선택해 주세요.</p> : <ol className="selected-list">{selected.map((song, index) => <li key={song.id}><span className="selected-index">{String(index + 1).padStart(2, '0')}</span><span className="selected-song"><strong>{song.title}</strong><small>{displayPerson(song.author)}</small></span><div className="selected-actions"><button type="button" onClick={() => moveSong(index, -1)} disabled={index === 0} aria-label={`${song.title} 위로`}>↑</button><button type="button" onClick={() => moveSong(index, 1)} disabled={index === selected.length - 1} aria-label={`${song.title} 아래로`}>↓</button><button type="button" onClick={() => setSelected((items) => items.filter((item) => item.id !== song.id))} aria-label={`${song.title} 제거`}>×</button></div></li>)}</ol>}
+                <div className="editor-heading"><h2>트렌드</h2></div>
               </div>}
             </div>
           </aside>
@@ -444,7 +518,7 @@ export function WorshipApp() {
               <div className="inspector-group"><h3>기존 PPT</h3><label className="file-field"><span className="file-picker-button">PPTX 선택</span><input type="file" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" onChange={(event) => setExistingPpt(event.target.files?.[0] ?? null)} /><small>{existingPpt ? `${existingPpt.name} · 기존 슬라이드 뒤에 추가` : '최대 20MB · 새 슬라이드에 디자인 적용'}</small></label></div>
               {pptNotice && <p className={`notice ${pptNotice.kind ?? ''}`} role="status" aria-live="polite">{pptNotice.text}</p>}
             </div>
-            <div className="inspector-footer"><span>{selected.length}곡 · {preview?.slideCount ?? 0}장</span><button className="btn btn--primary" type="button" onClick={createPpt} disabled={creating || !selected.length}>{creating ? '만드는 중…' : 'PPTX 다운로드'}</button></div>
+            <div className="inspector-footer"><button className="editor-queue-link" type="button" onClick={() => { setEditorTab('songs'); window.requestAnimationFrame(() => selectedQueueRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })); }} aria-label={`제작 목록, ${selected.length}곡 · ${preview?.slideCount ?? 0}장`}>{selected.length}곡 · {preview?.slideCount ?? 0}장 <span>제작 목록</span></button><button className="btn btn--primary" type="button" onClick={createPpt} disabled={creating || !selected.length}>{creating ? '만드는 중…' : 'PPTX 다운로드'}</button></div>
           </aside>
         </main>
       ) : (
