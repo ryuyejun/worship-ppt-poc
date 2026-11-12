@@ -58,6 +58,7 @@ export function WorshipApp() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchWidgetRef = useRef<HTMLDivElement>(null);
   const selectedQueueRef = useRef<HTMLElement>(null);
+  const artworkAttempts = useRef(new Set<string>());
   const [libraryQuery, setLibraryQuery] = useState('');
   const [results, setResults] = useState<Song[]>([]);
   const [selected, setSelected] = useState<Song[]>([]);
@@ -127,6 +128,16 @@ export function WorshipApp() {
     }
   }, [recentSongs]);
 
+  useEffect(() => {
+    for (const recent of recentSongs) {
+      const key = `${recent.id}:${recent.title}`;
+      if (!recent.artworkUrl && !artworkAttempts.current.has(key)) {
+        artworkAttempts.current.add(key);
+        void loadSongArtwork(recent);
+      }
+    }
+  }, [recentSongs]);
+
   function selectSong(song: Song, closeSearch = true) {
     setActiveSong(song);
     if (cloudflareMode && song.id > 0 && !song.lyrics) {
@@ -136,11 +147,11 @@ export function WorshipApp() {
     }
     setEditorTab('songs');
     if (closeSearch) setSearchOpen(false);
-    setRecentSongs((songs) => [{ id: song.id, title: song.title, artist: song.artist, selectedAt: Date.now() }, ...songs.filter((recent) => recent.id !== song.id)].slice(0, 12));
-    void loadSongArtwork(song);
+    artworkAttempts.current.delete(`${song.id}:${song.title}`);
+    setRecentSongs((songs) => [{ ...songs.find((recent) => recent.id === song.id && recent.title === song.title), id: song.id, title: song.title, artist: song.artist, selectedAt: Date.now() }, ...songs.filter((recent) => recent.id !== song.id)].slice(0, 12));
   }
 
-  async function loadSongArtwork(song: Song) {
+  async function loadSongArtwork(song: Pick<Song, 'id' | 'title'>) {
     try {
       const response = await api<SongArtwork>('/song-artwork/search', { songId: song.id, title: song.title });
       if (!response.data.available || !response.data.imageUrl) return;
