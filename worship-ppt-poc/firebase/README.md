@@ -21,3 +21,9 @@ npx firebase-tools emulators:exec --only firestore --project demo-worship 'GCLOU
 ```
 
 가져오기 도구는 로컬 MySQL과 `demo-` 프로젝트의 로컬 에뮬레이터만 허용하며 기존 Firestore 문서를 덮어쓰지 않습니다. 여러 배치 중 하나가 실패하면 이전 배치가 남을 수 있으므로 깨끗한 에뮬레이터에서 시험해야 합니다.
+
+## Yebit 프로젝트 연결
+
+Firebase 콘솔의 `yebit-39286` 프로젝트에 `Yebit` 웹 앱과 서울 리전 Firestore가 생성되어 있습니다. Spark 무료 요금제이며 Firestore 클라이언트 접근은 기본적으로 차단되어 있습니다. React 앱은 `frontend/.env.local`의 Vite 설정으로 Firebase SDK를 초기화합니다. 설정 파일은 Git에 추가하지 않습니다.
+
+주의: SDK 초기화는 기존 기능의 Firestore 전환을 뜻하지 않습니다. 현재 화면의 곡 검색 및 PPT 생성은 기존 Spring 서버를 사용합니다. 실데이터는 Firestore에 이전하지 않았으며 인증과 보안 규칙 설계가 필요합니다. Spark 요금제에서는 Cloud Functions를 배포할 수 없으므로 기존 Functions 초안을 배포하지 마세요.
