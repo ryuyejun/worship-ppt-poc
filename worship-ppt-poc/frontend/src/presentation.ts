@@ -1,7 +1,8 @@
 import type { Song } from './types';
 
 export type SlideStyle = { backgroundColor: string; textColor: string; fontFamily: string; fontSize: number; alignment: 'LEFT' | 'CENTER' | 'RIGHT'; linesPerSlide: number; bold: boolean; backgroundImageBase64?: string; backgroundImageType?: string };
-export type PresentationInput = { songIds: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; pptxBase64?: string; style: SlideStyle };
+export type SlideSize = { width: number; height: number };
+export type PresentationInput = { slideSize?: SlideSize; songIds: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; pptxBase64?: string; style: SlideStyle };
 export type Slide = { title: string; lines: string[] };
 const lyricCache = new Map<number, Song>();
 
@@ -40,18 +41,18 @@ export async function collectSlides(input: PresentationInput, signal?: AbortSign
   return slides;
 }
 
-export async function makePresentation(slides: Slide[], style: SlideStyle): Promise<Blob> {
+export async function makePresentation(slides: Slide[], style: SlideStyle, size = {width:1280,height:720}): Promise<Blob> {
   const { default: PptxGenJS } = await import('pptxgenjs');
-  const ppt = new PptxGenJS(); ppt.layout = 'LAYOUT_WIDE';
+  const ppt = new PptxGenJS(); ppt.defineLayout({ name:'CUSTOM', width:size.width/96, height:size.height/96 }); ppt.layout = 'CUSTOM';
   const alignment = { LEFT: 'left', CENTER: 'center', RIGHT: 'right' } as const;
   for (const item of slides) {
     const slide = ppt.addSlide();
     slide.background = { color: style.backgroundColor.replace('#', '') };
     if (style.backgroundImageBase64 && style.backgroundImageType) {
       const type = style.backgroundImageType === 'PNG' ? 'png' : 'jpeg';
-      slide.addImage({ data: `data:image/${type};base64,${style.backgroundImageBase64}`, x: 0, y: 0, w: 13.333333, h: 7.5 });
+      slide.addImage({ data: `data:image/${type};base64,${style.backgroundImageBase64}`, x: 0, y: 0, w: size.width/96, h: size.height/96 });
     }
-    slide.addText(item.lines.join('\n'), { x: 60 / 72, y: 120 / 72, w: 840 / 72, h: 300 / 72,
+    slide.addText(item.lines.join('\n'), { x: size.width*60/1280/96, y: size.height*120/720/96, w: size.width*840/1280/96, h: size.height*300/720/96,
       fontFace: style.fontFamily, fontSize: style.fontSize, color: style.textColor.replace('#', ''),
       bold: style.bold, align: alignment[style.alignment], valign: 'middle', margin: 0 });
   }
@@ -60,17 +61,17 @@ export async function makePresentation(slides: Slide[], style: SlideStyle): Prom
   return data;
 }
 
-export async function renderSlide(slide: Slide, style: SlideStyle, width = 1280): Promise<string> {
-  const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = Math.round(width * 9 / 16);
+export async function renderSlide(slide: Slide, style: SlideStyle, width = 1280, size = {width:1280,height:720}): Promise<string> {
+  const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = Math.round(width * size.height / size.width);
   const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('미리보기를 만들 수 없습니다.');
-  ctx.scale(canvas.width / 1280, canvas.height / 720);
-  ctx.fillStyle = style.backgroundColor; ctx.fillRect(0, 0, 1280, 720);
+  ctx.scale(canvas.width / size.width, canvas.height / size.height);
+  ctx.fillStyle = style.backgroundColor; ctx.fillRect(0, 0, size.width, size.height);
   if (style.backgroundImageBase64 && style.backgroundImageType) {
     const image = new Image(); image.src = `data:image/${style.backgroundImageType === 'PNG' ? 'png' : 'jpeg'};base64,${style.backgroundImageBase64}`;
-    await image.decode(); ctx.drawImage(image, 0, 0, 1280, 720);
+    await image.decode(); ctx.drawImage(image, 0, 0, size.width, size.height);
   }
-  const size = style.fontSize * 4 / 3; const height = size * 1.2;
-  ctx.font = `${style.bold ? 'bold ' : ''}${size}px "${style.fontFamily.replace(/["\\]/g, '')}", sans-serif`;
+  const fontPx = style.fontSize * 4 / 3; const height = fontPx * 1.2;
+  ctx.font = `${style.bold ? 'bold ' : ''}${fontPx}px "${style.fontFamily.replace(/["\\]/g, '')}", sans-serif`;
   ctx.fillStyle = style.textColor; ctx.textBaseline = 'middle'; ctx.textAlign = { LEFT: 'left', CENTER: 'center', RIGHT: 'right' }[style.alignment] as CanvasTextAlign;
   const wrapped: string[] = [];
   for (const line of slide.lines) {

@@ -10,9 +10,9 @@ export async function api<T>(path: string, body?: unknown, signal?: AbortSignal)
     const input = path === '/ppt/preview' ? previewInput.presentation : body as PresentationInput;
     const slides = await collectSlides(input, signal);
     if (signal?.aborted) throw new DOMException('요청이 취소되었습니다.', 'AbortError');
-    if (path === '/ppt/batch') return { data: await makePresentation(slides, input.style) as T, headers: new Headers() };
+    if (path === '/ppt/batch') return { data: await makePresentation(slides, input.style, input.slideSize) as T, headers: new Headers() };
     const slideIndex = Math.max(0, Math.min(previewInput.slideIndex, slides.length - 1));
-    const imageBase64 = await renderSlide(slides[slideIndex], input.style);
+    const imageBase64 = await renderSlide(slides[slideIndex], input.style, 1280, input.slideSize);
     return { data: { imageBase64, slideIndex, slideCount: slides.length } as T, headers: new Headers() };
   }
   const response = await fetch(path, {

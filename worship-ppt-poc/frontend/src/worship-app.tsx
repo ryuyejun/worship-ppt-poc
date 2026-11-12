@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, cloudflareMode } from './api';
 import type { Song, SongRequest } from './types';
-import { collectSlides, renderSlide, type Slide, type SlideStyle } from './presentation';
+import { collectSlides, renderSlide, type Slide, type SlideStyle, type SlideSize } from './presentation';
 
 type Notice = { text: string; kind?: 'error' | 'success' } | null;
 type RecentSong = { id: number; title: string; artist: string | null; selectedAt: number; artworkUrl?: string; artworkSourceUrl?: string; artworkContributor?: string };
@@ -11,7 +11,7 @@ type PptStyle = {
   alignment: 'LEFT' | 'CENTER' | 'RIGHT'; linesPerSlide: number; bold: boolean;
 };
 type Preview = { imageBase64: string; slideIndex: number; slideCount: number };
-type PptPayload = { songIds: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; pptxBase64?: string; style: PptStyle & { backgroundImageBase64?: string; backgroundImageType?: string } };
+type PptPayload = { slideSize?: SlideSize; songIds: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; pptxBase64?: string; style: PptStyle & { backgroundImageBase64?: string; backgroundImageType?: string } };
 
 const templateStyles: Record<string, PptStyle> = {
   original: { backgroundColor: '#16233a', textColor: '#ffffff', fontFamily: 'Apple SD Gothic Neo', fontSize: 40, alignment: 'CENTER', linesPerSlide: 2, bold: false },
@@ -109,9 +109,11 @@ export function WorshipApp() {
     }
   });
   const [presentationTitle, setPresentationTitle] = useState('제목없는 디자인');
+  const [slideSize, setSlideSize] = useState<SlideSize>({ width:1280, height:720 });
+  const [sizeOpen, setSizeOpen] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewIndex, setPreviewIndex] = useState(0);
-  const [prepared, setPrepared] = useState<{ slides: Slide[]; style: SlideStyle; thumbnails: string[] } | null>(null);
+  const [prepared, setPrepared] = useState<{ slides: Slide[]; style: SlideStyle; thumbnails: string[]; slideSize: SlideSize } | null>(null);
   const previewCache = useRef(new Map<number, string>());
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState('');
@@ -181,6 +183,7 @@ export function WorshipApp() {
 
   function presentationPayload(): PptPayload {
     return {
+      slideSize,
       songIds: selected.map((song) => song.id),
       externalSongs: selected.filter((song) => song.id < 0).map((song) => ({ id: song.id, title: song.title, artist: song.artist, lyrics: song.lyrics ?? '' })),
       ...(existingPptData ? { pptxBase64: existingPptData } : {}),
@@ -214,9 +217,10 @@ export function WorshipApp() {
       try {
         const input = presentationPayload();
         const slides = await collectSlides(input, controller.signal);
-        const thumbnails = await Promise.all(slides.map((slide) => renderSlide(slide, input.style, 320)));
+        const size = input.slideSize ?? {width:1280,height:720};
+        const thumbnails = await Promise.all(slides.map((slide) => renderSlide(slide, input.style, 320, size)));
         if (controller.signal.aborted) return;
-        setPrepared({ slides, style: input.style, thumbnails });
+        setPrepared({ slides, style: input.style, thumbnails, slideSize: size });
         setPreviewIndex((index) => Math.min(index, slides.length - 1));
       } catch (error) {
         if (!controller.signal.aborted) setPreviewError(error instanceof Error ? error.message : '미리보기를 불러오지 못했습니다.');
@@ -225,7 +229,7 @@ export function WorshipApp() {
       }
     }, 200);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [selected, pptStyle, backgroundImage, existingPpt, existingPptData, existingPptError, validStyle, previewRetry]);
+  }, [selected, pptStyle, backgroundImage, slideSize, existingPpt, existingPptData, existingPptError, validStyle, previewRetry]);
 
   useEffect(() => {
     if (!prepared) return;
@@ -233,7 +237,7 @@ export function WorshipApp() {
     const index = Math.min(previewIndex, prepared.slides.length - 1);
     const cached = previewCache.current.get(index);
     setPreview({ imageBase64: cached ?? prepared.thumbnails[index], slideIndex: index, slideCount: prepared.slides.length });
-    if (!cached) void renderSlide(prepared.slides[index], prepared.style).then((imageBase64) => {
+    if (!cached) void renderSlide(prepared.slides[index], prepared.style, 1280, prepared.slideSize).then((imageBase64) => {
       if (!cancelled) {
         previewCache.current.set(index, imageBase64);
         setPreview({ imageBase64, slideIndex: index, slideCount: prepared.slides.length });
@@ -565,9 +569,9 @@ export function WorshipApp() {
             </div>
           </aside>
           <section className="editor-workspace" aria-labelledby="preview-title">
-            <div className="editor-toolbar"><label className="editor-document-title"><span className="visually-hidden">프레젠테이션 제목</span><input value={presentationTitle} onChange={(event) => setPresentationTitle(event.target.value)} maxLength={80} /><img src="/assets/figma/pencil.svg" alt="" /></label><span className="editor-page-count">1280 × 720</span></div>
+            <div className="editor-toolbar"><label className="editor-document-title"><span className="visually-hidden">프레젠테이션 제목</span><input value={presentationTitle} onChange={(event) => setPresentationTitle(event.target.value)} maxLength={80} /><img src="/assets/figma/pencil.svg" alt="" /></label><div className="editor-size-control"><button className="editor-page-count" type="button" aria-expanded={sizeOpen} onClick={() => setSizeOpen((open) => !open)}>{slideSize.width} × {slideSize.height}</button>{sizeOpen && <div className="editor-size-menu"><div className="editor-size-presets">{[{label:'16:9',width:1280,height:720},{label:'16:10',width:1280,height:800},{label:'4:3',width:1280,height:960},{label:'1:1',width:960,height:960}].map((preset) => <button type="button" key={preset.label} aria-pressed={slideSize.width===preset.width&&slideSize.height===preset.height} onClick={() => setSlideSize({width:preset.width,height:preset.height})}>{preset.label}</button>)}</div><div className="editor-size-custom"><label>가로<input type="number" min="320" max="3840" value={slideSize.width} onChange={(event) => setSlideSize((size) => ({...size,width:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label><span>×</span><label>세로<input type="number" min="320" max="3840" value={slideSize.height} onChange={(event) => setSlideSize((size) => ({...size,height:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label></div></div>}</div></div>
             <div className="editor-stage">
-              <div className={`editor-canvas ${preview && !previewLoading && !previewError ? 'has-preview' : ''}`} aria-live="polite">
+              <div className={`editor-canvas ${preview && !previewLoading && !previewError ? 'has-preview' : ''}`} style={{aspectRatio:`${slideSize.width} / ${slideSize.height}`}} aria-live="polite">
                 {preview && !previewLoading && !previewError ? <img src={`data:image/png;base64,${preview.imageBase64}`} alt={`${preview.slideIndex + 1}번째 슬라이드 미리보기`} /> : previewLoading ? <div className="editor-canvas-message"><span className="preview-spinner" aria-hidden="true" /><strong>슬라이드를 불러오는 중</strong></div> : previewError ? <div className="editor-canvas-message"><strong>미리보기를 열 수 없습니다</strong><span>{previewError}</span><button type="button" className="preview-retry" onClick={() => setPreviewRetry((value) => value + 1)}>다시 시도</button></div> : null}
               </div>
             </div>
