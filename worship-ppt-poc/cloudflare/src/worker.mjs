@@ -1,5 +1,6 @@
 import { listSongs, searchSongs, getSong, queueMissing } from './songs.mjs';
 import { findArtwork, getArtworkImage } from './artwork.mjs';
+import { refreshYoutubeStatistics } from './youtube-statistics.mjs';
 
 const json = (body, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
 const fail = (message, status) => json({ success: false, data: null, error: message }, status);
@@ -26,6 +27,9 @@ async function readInput(request) {
 }
 
 export default {
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil(refreshYoutubeStatistics(env.DB, env.YOUTUBE_API_KEY));
+  },
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
     if (path === '/health' && request.method === 'GET') {
