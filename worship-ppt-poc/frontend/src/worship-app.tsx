@@ -103,7 +103,16 @@ export function WorshipApp() {
     }
   });
   const [favoriteArtwork, setFavoriteArtwork] = useState<Record<number, FavoriteArtwork>>({});
-  const [trendReloadKey, setTrendReloadKey] = useState(0);
+  const [songSelectionCounts, setSongSelectionCounts] = useState<Record<number, number>>(() => {
+    try {
+      const stored = window.localStorage.getItem('yebit.song-selection-counts');
+      const parsed: unknown = stored ? JSON.parse(stored) : {};
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+      return Object.fromEntries(Object.entries(parsed).filter(([id, count]) => /^\d+$/.test(id) && Number(id) > 0 && Number.isSafeInteger(count) && Number(count) > 0)) as Record<number, number>;
+    } catch {
+      return {};
+    }
+  });
   const [favoriteIds, setFavoriteIds] = useState<number[]>(() => {
     try {
       const stored = window.localStorage.getItem('yebit.favorite-song-ids');
@@ -128,6 +137,7 @@ export function WorshipApp() {
 
   const validStyle = Boolean(pptStyle.fontFamily.trim()) && pptStyle.fontFamily.length <= 80 && Number.isInteger(pptStyle.fontSize) && pptStyle.fontSize >= 16 && pptStyle.fontSize <= 100 && Number.isInteger(pptStyle.linesPerSlide) && pptStyle.linesPerSlide >= 1 && pptStyle.linesPerSlide <= 6;
   const favoriteSongs = readySongs.filter((song) => favoriteIds.includes(song.id));
+  const trendingSongs = allSongs.filter((song) => songSelectionCounts[song.id] > 0).sort((first, second) => (songSelectionCounts[second.id] ?? 0) - (songSelectionCounts[first.id] ?? 0) || first.title.localeCompare(second.title, 'ko')).slice(0, 10);
 
   useEffect(() => {
     try {
@@ -146,6 +156,14 @@ export function WorshipApp() {
   }, [recentSongs]);
 
   useEffect(() => {
+    try {
+      window.localStorage.setItem('yebit.song-selection-counts', JSON.stringify(songSelectionCounts));
+    } catch {
+      // 이 기기의 트렌드는 저장소를 사용할 수 없는 경우 현재 화면에서만 유지합니다.
+    }
+  }, [songSelectionCounts]);
+
+  useEffect(() => {
     for (const recent of recentSongs) {
       if (!recent.artworkUrl) requestSongArtwork(recent);
     }
@@ -159,6 +177,7 @@ export function WorshipApp() {
 
   function selectSong(song: Song, closeSearch = true) {
     setActiveSong(song);
+    if (song.id > 0) setSongSelectionCounts((counts) => ({ ...counts, [song.id]: (counts[song.id] ?? 0) + 1 }));
     if (cloudflareMode && song.id > 0 && !song.lyrics) {
       void api<Song>('/song', { id: song.id }).then(({ data }) => {
         setActiveSong((current) => current?.id === song.id ? data : current);
@@ -581,7 +600,7 @@ export function WorshipApp() {
             <div className="editor-tabs" role="group" aria-label="곡 라이브러리">
               <button type="button" aria-pressed={editorTab === 'songs'} onClick={() => setEditorTab('songs')}>최근</button>
               <button type="button" aria-pressed={editorTab === 'favorites'} onClick={() => setEditorTab('favorites')}>즐겨찾기</button>
-              <button type="button" aria-pressed={editorTab === 'trending'} onClick={() => { setTrendReloadKey(Date.now()); setEditorTab('trending'); }}>트렌드</button>
+              <button type="button" aria-pressed={editorTab === 'trending'} onClick={() => setEditorTab('trending')}>트렌드</button>
             </div>
             <div className="editor-controls">
               {editorTab === 'songs' ? <div className="editor-control-group">
@@ -593,13 +612,12 @@ export function WorshipApp() {
                 {selected.length > 0 && <section ref={selectedQueueRef} className="editor-selected-queue" aria-labelledby="editor-selected-title"><div className="editor-heading"><h2 id="editor-selected-title">제작 목록</h2><span>{selected.length}곡</span></div><ol className="selected-list">{selected.map((song, index) => <li key={song.id}><span className="selected-index">{String(index + 1).padStart(2, '0')}</span><span className="selected-song"><strong>{song.title}</strong><small>{displayPerson(song.author)}</small></span><div className="selected-actions"><button type="button" onClick={() => moveSong(index, -1)} disabled={index === 0} aria-label={`${song.title} 위로`}>↑</button><button type="button" onClick={() => moveSong(index, 1)} disabled={index === selected.length - 1} aria-label={`${song.title} 아래로`}>↓</button><button type="button" onClick={() => setSelected((items) => items.filter((item) => item.id !== song.id))} aria-label={`${song.title} 제거`}>×</button></div></li>)}</ol></section>}
               </div> : editorTab === 'favorites' ? <div className="editor-control-group">
                 <div className="editor-heading"><h2>즐겨찾기</h2><span>{favoriteSongs.length}곡</span></div>
-                {loadingSongs ? <div className="editor-library-empty"><strong>곡 목록을 확인하고 있습니다</strong></div> : !libraryError && (favoriteSongs.length === 0 ? <div className="editor-library-empty"><strong>즐겨찾는 곡이 없습니다</strong><span>곡 검색 결과에서 별표를 눌러 추가하세요.</span></div> : <div className="editor-favorite-list">{favoriteSongs.map((song) => { const artwork = favoriteArtwork[song.id]; return <div className="editor-favorite-row favorite-artwork-row" key={song.id}>{artwork?.imageUrl ? <img className="recent-song-card__image" src={artwork.imageUrl} alt="" /> : null}<button className="search-result-row favorite-artwork-glass" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>{song.category?.toUpperCase() === 'HYMN' && song.hymnNumber ? `새찬송가 ${song.hymnNumber}장` : displayKnown(song.artist)}</small>{artwork?.sourceUrl && <span className="favorite-artwork-credit">Pixabay · {artwork.contributor || '이미지 출처'}</span>}</button><button className="favorite-toggle is-favorite favorite-artwork-toggle" type="button" onClick={() => toggleFavorite(song)} aria-label={`${song.title} 즐겨찾기 해제`}>★</button></div>; })}</div>)}
+                {loadingSongs ? <div className="editor-library-empty"><strong>곡 목록을 확인하고 있습니다</strong></div> : !libraryError && (favoriteSongs.length === 0 ? <div className="editor-library-empty"><strong>즐겨찾는 곡이 없습니다</strong><span>곡 검색 결과에서 별표를 눌러 추가하세요.</span></div> : <div className="editor-favorite-list">{favoriteSongs.map((song) => { const artwork = favoriteArtwork[song.id]; return <div className="recent-song-card favorite-artwork-row" key={song.id}>{artwork?.imageUrl && <img className="recent-song-card__image" src={artwork.imageUrl} alt="" />}<span className="recent-song-card__glass favorite-artwork-glass"><button className="recent-song-card__title" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong></button><span className="recent-song-card__meta"><small>{song.category?.toUpperCase() === 'HYMN' && song.hymnNumber ? `새찬송가 ${song.hymnNumber}장` : displayKnown(song.artist) || '즐겨찾기 곡'}</small>{artwork?.sourceUrl && <a href={artwork.sourceUrl} target="_blank" rel="noreferrer">Pixabay · {artwork.contributor || '이미지 출처'}</a>}</span></span><button className="favorite-toggle is-favorite favorite-artwork-toggle" type="button" onClick={() => toggleFavorite(song)} aria-label={`${song.title} 즐겨찾기 해제`}>★</button></div>; })}</div>)}
               </div> : null}
               <div className={`editor-control-group trend-panel${editorTab === 'trending' ? ' is-visible' : ' is-preloaded'}`} aria-hidden={editorTab !== 'trending'}>
-                <div className="editor-heading"><h2>트렌드</h2></div>
-                <p className="trend-source-note">KCCM 주간 Top 50 · 국내 음원 서비스 5곳과 YouTube 순위를 종합합니다. 교회별 실제 선호와 다를 수 있습니다.</p>
-                <iframe key={trendReloadKey} className="trend-chart-frame" src="https://kccm.app/chart" title="KCCM 최신 찬양 주간 차트" referrerPolicy="no-referrer" />
-                <a className="trend-source-link" href="https://kccm.app/chart" target="_blank" rel="noreferrer">차트가 보이지 않으면 KCCM에서 확인하기 ↗</a>
+                <div className="editor-heading"><h2>이 기기에서 자주 선택한 곡</h2><span>{trendingSongs.length}곡</span></div>
+                <p className="trend-source-note">이 브라우저에서 곡을 선택한 횟수로 표시합니다. 다른 기기의 기록은 포함되지 않습니다.</p>
+                {trendingSongs.length ? <ol className="local-trend-list">{trendingSongs.map((song, index) => <li key={song.id}><span className="local-trend-rank">{String(index + 1).padStart(2, '0')}</span><button type="button" className="local-trend-song" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>{displayKnown(song.artist) || (song.category?.toUpperCase() === 'HYMN' && song.hymnNumber ? `새찬송가 ${song.hymnNumber}장` : '곡')}</small></button><span className="local-trend-count">{songSelectionCounts[song.id]}회</span></li>)}</ol> : <div className="editor-library-empty"><strong>아직 선택 기록이 없습니다</strong><span>곡을 선택하면 이 기기의 선택 횟수 순으로 표시됩니다.</span></div>}
               </div>
             </div>
           </aside>
