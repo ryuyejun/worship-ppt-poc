@@ -425,3 +425,12 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
 .editor-size-custom { display:flex; align-items:end; gap:7px; margin-top:12px; }
 .editor-size-custom label { display:grid; flex:1; gap:4px; color:#626a6e; font-size:12px; }
 .editor-size-custom input { width:100%; height:34px; border:1px solid #d8dde0; border-radius:5px; padding:0 7px; }
+.font-picker { position:relative; }
+.font-search-glass { --glass-x:50%; --glass-y:0%; position:relative; isolation:isolate; display:flex; align-items:center; gap:8px; min-height:40px; overflow:hidden; border:1px solid rgba(255,255,255,.88); border-radius:10px; background:linear-gradient(135deg,rgba(255,255,255,.83),rgba(255,255,255,.54) 55%,rgba(247,250,253,.76)); padding:0 10px; -webkit-backdrop-filter:blur(18px) saturate(175%); backdrop-filter:blur(18px) saturate(175%); box-shadow:inset 0 1px 2px rgba(255,255,255,.95),0 5px 16px rgba(75,92,116,.1); }
+.font-search-glass::before { position:absolute; inset:0; z-index:0; background:radial-gradient(ellipse 160px 70px at var(--glass-x) var(--glass-y),rgba(255,255,255,.62),transparent 85%); content:''; pointer-events:none; }
+.font-search-glass input { position:relative; z-index:1; width:100%; min-width:0; border:0; outline:0; background:transparent; color:#253041; font:inherit; }
+.font-search-glass input:focus { outline:0; }
+.font-search-glass button { position:relative; z-index:1; border:0; background:transparent; color:#59636d; cursor:pointer; }
+.font-options { position:absolute; z-index:8; top:100%; right:0; left:0; display:grid; max-height:220px; overflow:auto; margin-top:5px; border:1px solid rgba(255,255,255,.9); border-radius:10px; background:rgba(255,255,255,.82); padding:5px; -webkit-backdrop-filter:blur(22px) saturate(180%); backdrop-filter:blur(22px) saturate(180%); box-shadow:0 10px 28px rgba(55,72,94,.16); }
+.font-options button { border:0; border-radius:6px; background:transparent; padding:9px 10px; color:#28343d; text-align:left; cursor:pointer; }
+.font-options button:hover,.font-options button[aria-selected="true"] { background:rgba(222,239,249,.8); }
