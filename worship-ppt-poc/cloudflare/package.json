@@ -1,0 +1,7 @@
+{
+  "name": "yebit-cloudflare-migration",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "dependencies": { "mysql2": "^3.24.0" }
+}

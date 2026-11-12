@@ -23,6 +23,7 @@ frontend/*.tsbuildinfo
 .env
 .env.*
 firebase/functions/node_modules/
+cloudflare/node_modules/
 
 firebase/*-debug.log
 firebase/.firebase/
