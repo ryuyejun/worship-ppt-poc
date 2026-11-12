@@ -19,3 +19,5 @@ node cloudflare/tools/sqlite-to-d1.mjs '/secure/path/yebit-backup.sqlite' '/secu
 ```
 
 이 SQL은 빈 데이터베이스용입니다. 실제 D1 적용 전에 별도 테스트 D1에서 검증하고 접근 제어를 구성해야 합니다.
+
+`wrangler.test.jsonc`는 별도 테스트 DB `yebit-test`에만 연결됩니다. 원본 MySQL의 786곡, 별칭 51개, 요청 0개를 이 테스트 DB에 가져온 뒤 다시 내려받아 각 행을 원본 검증본과 비교했습니다. 운영 배포 설정으로 사용하지 마세요.
