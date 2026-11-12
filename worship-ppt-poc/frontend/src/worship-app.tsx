@@ -6,6 +6,7 @@ import { collectSlides, renderSlide, type Slide, type SlideStyle, type SlideSize
 type Notice = { text: string; kind?: 'error' | 'success' } | null;
 type RecentSong = { id: number; title: string; artist: string | null; selectedAt: number; artworkUrl?: string; artworkSourceUrl?: string; artworkContributor?: string };
 type SongArtwork = { available: boolean; songId: number; imageUrl: string | null; sourceUrl: string | null; contributor: string | null };
+type FavoriteArtwork = { imageUrl: string; sourceUrl?: string; contributor?: string };
 type PptStyle = {
   backgroundColor: string; textColor: string; fontFamily: string; fontSize: number;
   alignment: 'LEFT' | 'CENTER' | 'RIGHT'; linesPerSlide: number; bold: boolean;
@@ -101,6 +102,8 @@ export function WorshipApp() {
       return [];
     }
   });
+  const [favoriteArtwork, setFavoriteArtwork] = useState<Record<number, FavoriteArtwork>>({});
+  const [trendReloadKey, setTrendReloadKey] = useState(0);
   const [favoriteIds, setFavoriteIds] = useState<number[]>(() => {
     try {
       const stored = window.localStorage.getItem('yebit.favorite-song-ids');
@@ -144,13 +147,15 @@ export function WorshipApp() {
 
   useEffect(() => {
     for (const recent of recentSongs) {
-      const key = `${recent.id}:${recent.title}`;
-      if (!recent.artworkUrl && !artworkAttempts.current.has(key)) {
-        artworkAttempts.current.add(key);
-        void loadSongArtwork(recent);
-      }
+      if (!recent.artworkUrl) requestSongArtwork(recent);
     }
   }, [recentSongs]);
+
+  useEffect(() => {
+    for (const song of favoriteSongs) {
+      if (!favoriteArtwork[song.id]) requestSongArtwork(song);
+    }
+  }, [favoriteSongs, favoriteArtwork]);
 
   function selectSong(song: Song, closeSearch = true) {
     setActiveSong(song);
@@ -169,20 +174,38 @@ export function WorshipApp() {
     try {
       const response = await api<SongArtwork>('/song-artwork/search', { songId: song.id, title: song.title });
       if (!response.data.available || !response.data.imageUrl) return;
+      const artwork = {
+        imageUrl: response.data.imageUrl,
+        sourceUrl: response.data.sourceUrl ?? undefined,
+        contributor: response.data.contributor ?? undefined,
+      };
+      setFavoriteArtwork((items) => ({ ...items, [song.id]: artwork }));
       setRecentSongs((songs) => songs.map((recent) => recent.id === song.id ? {
         ...recent,
-        artworkUrl: response.data.imageUrl ?? undefined,
-        artworkSourceUrl: response.data.sourceUrl ?? undefined,
-        artworkContributor: response.data.contributor ?? undefined,
+        artworkUrl: artwork.imageUrl ?? undefined,
+        artworkSourceUrl: artwork.sourceUrl,
+        artworkContributor: artwork.contributor,
       } : recent));
     } catch {
       // Pixabay를 사용할 수 없어도 곡 검색과 선택은 계속 동작합니다.
     }
   }
 
+  function requestSongArtwork(song: Pick<Song, 'id' | 'title'>) {
+    const key = `${song.id}:${song.title}`;
+    if (artworkAttempts.current.has(key)) return;
+    artworkAttempts.current.add(key);
+    void loadSongArtwork(song);
+  }
+
   function toggleFavorite(song: Song) {
     if (song.id <= 0) return;
-    setFavoriteIds((ids) => ids.includes(song.id) ? ids.filter((id) => id !== song.id) : [...ids, song.id]);
+    if (favoriteIds.includes(song.id)) {
+      setFavoriteIds((ids) => ids.filter((id) => id !== song.id));
+      return;
+    }
+    requestSongArtwork(song);
+    setFavoriteIds((ids) => [...ids, song.id]);
   }
 
   function presentationPayload(): PptPayload {
@@ -558,7 +581,7 @@ export function WorshipApp() {
             <div className="editor-tabs" role="group" aria-label="곡 라이브러리">
               <button type="button" aria-pressed={editorTab === 'songs'} onClick={() => setEditorTab('songs')}>최근</button>
               <button type="button" aria-pressed={editorTab === 'favorites'} onClick={() => setEditorTab('favorites')}>즐겨찾기</button>
-              <button type="button" aria-pressed={editorTab === 'trending'} onClick={() => setEditorTab('trending')}>트렌드</button>
+              <button type="button" aria-pressed={editorTab === 'trending'} onClick={() => { setTrendReloadKey(Date.now()); setEditorTab('trending'); }}>트렌드</button>
             </div>
             <div className="editor-controls">
               {editorTab === 'songs' ? <div className="editor-control-group">
@@ -570,10 +593,14 @@ export function WorshipApp() {
                 {selected.length > 0 && <section ref={selectedQueueRef} className="editor-selected-queue" aria-labelledby="editor-selected-title"><div className="editor-heading"><h2 id="editor-selected-title">제작 목록</h2><span>{selected.length}곡</span></div><ol className="selected-list">{selected.map((song, index) => <li key={song.id}><span className="selected-index">{String(index + 1).padStart(2, '0')}</span><span className="selected-song"><strong>{song.title}</strong><small>{displayPerson(song.author)}</small></span><div className="selected-actions"><button type="button" onClick={() => moveSong(index, -1)} disabled={index === 0} aria-label={`${song.title} 위로`}>↑</button><button type="button" onClick={() => moveSong(index, 1)} disabled={index === selected.length - 1} aria-label={`${song.title} 아래로`}>↓</button><button type="button" onClick={() => setSelected((items) => items.filter((item) => item.id !== song.id))} aria-label={`${song.title} 제거`}>×</button></div></li>)}</ol></section>}
               </div> : editorTab === 'favorites' ? <div className="editor-control-group">
                 <div className="editor-heading"><h2>즐겨찾기</h2><span>{favoriteSongs.length}곡</span></div>
-                {loadingSongs ? <div className="editor-library-empty"><strong>곡 목록을 확인하고 있습니다</strong></div> : !libraryError && (favoriteSongs.length === 0 ? <div className="editor-library-empty"><strong>즐겨찾는 곡이 없습니다</strong><span>곡 검색 결과에서 별표를 눌러 추가하세요.</span></div> : <div className="editor-favorite-list">{favoriteSongs.map((song) => <div className="editor-favorite-row" key={song.id}><button className="search-result-row" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>{song.category?.toUpperCase() === 'HYMN' && song.hymnNumber ? `새찬송가 ${song.hymnNumber}장` : displayKnown(song.artist)}</small></button><button className="favorite-toggle is-favorite" type="button" onClick={() => toggleFavorite(song)} aria-label={`${song.title} 즐겨찾기 해제`}>★</button></div>)}</div>)}
-              </div> : <div className="editor-control-group">
+                {loadingSongs ? <div className="editor-library-empty"><strong>곡 목록을 확인하고 있습니다</strong></div> : !libraryError && (favoriteSongs.length === 0 ? <div className="editor-library-empty"><strong>즐겨찾는 곡이 없습니다</strong><span>곡 검색 결과에서 별표를 눌러 추가하세요.</span></div> : <div className="editor-favorite-list">{favoriteSongs.map((song) => { const artwork = favoriteArtwork[song.id]; return <div className="editor-favorite-row favorite-artwork-row" key={song.id}>{artwork?.imageUrl ? <img className="recent-song-card__image" src={artwork.imageUrl} alt="" /> : null}<button className="search-result-row favorite-artwork-glass" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>{song.category?.toUpperCase() === 'HYMN' && song.hymnNumber ? `새찬송가 ${song.hymnNumber}장` : displayKnown(song.artist)}</small>{artwork?.sourceUrl && <span className="favorite-artwork-credit">Pixabay · {artwork.contributor || '이미지 출처'}</span>}</button><button className="favorite-toggle is-favorite favorite-artwork-toggle" type="button" onClick={() => toggleFavorite(song)} aria-label={`${song.title} 즐겨찾기 해제`}>★</button></div>; })}</div>)}
+              </div> : null}
+              <div className={`editor-control-group trend-panel${editorTab === 'trending' ? ' is-visible' : ' is-preloaded'}`} aria-hidden={editorTab !== 'trending'}>
                 <div className="editor-heading"><h2>트렌드</h2></div>
-              </div>}
+                <p className="trend-source-note">CCM 랭킹 주간 순위 · YouTube 조회 변화 등을 기준으로 집계됩니다. 교회별 실제 선호와 다를 수 있습니다.</p>
+                <iframe key={trendReloadKey} className="trend-chart-frame" src="https://www.ccmranking.com/charts" title="CCM 랭킹 최신 찬양 차트" referrerPolicy="no-referrer" />
+                <a className="trend-source-link" href="https://www.ccmranking.com/charts" target="_blank" rel="noreferrer">차트가 보이지 않으면 CCM 랭킹에서 확인하기 ↗</a>
+              </div>
             </div>
           </aside>
           <section className="editor-workspace" aria-labelledby="preview-title">
