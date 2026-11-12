@@ -1,0 +1,8 @@
+{
+  "name": "yebit-api-test",
+  "main": "src/worker.mjs",
+  "compatibility_date": "2026-01-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  "d1_databases": [{ "binding": "DB", "database_name": "yebit-test", "database_id": "2e2e4878-ec26-477c-9da8-4cb919ccd2d3" }]
+}
