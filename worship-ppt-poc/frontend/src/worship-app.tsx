@@ -24,6 +24,11 @@ function displayPerson(value?: string | null) {
   return value?.trim() || '정보 없음';
 }
 
+function displayKnown(value?: string | null) {
+  const text = value?.trim() ?? '';
+  return /^(미확인|미확인한 곡|정보 없음|unknown)$/i.test(text) ? '' : text;
+}
+
 function trackSearchGlassReflection(event: React.PointerEvent<HTMLDivElement>) {
   if (event.pointerType !== 'mouse' || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const glass = event.currentTarget.querySelector<HTMLElement>('.editor-search-widget');
@@ -524,7 +529,7 @@ export function WorshipApp() {
                   <button className="visually-hidden" type="submit" disabled={searching || !query.trim()}>검색</button>
                 </form>
                 {query.trim() && <div className="editor-search-results" aria-live="polite">
-                  {liveSongMatches.length > 0 && <div className="search-result-group"><span>내 곡 목록</span>{liveSongMatches.map((song) => <div className="editor-favorite-row" key={song.id}><button className="search-result-row" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>{song.artist?.trim() || ''}</small></button><button className={`favorite-toggle${favoriteIds.includes(song.id) ? ' is-favorite' : ''}`} type="button" onClick={() => toggleFavorite(song)} aria-label={favoriteIds.includes(song.id) ? `${song.title} 즐겨찾기 해제` : `${song.title} 즐겨찾기 추가`}>{favoriteIds.includes(song.id) ? '★' : '☆'}</button></div>)}</div>}
+                  {liveSongMatches.length > 0 && <div className="search-result-group"><span>내 곡 목록</span>{liveSongMatches.map((song) => <div className="editor-favorite-row" key={song.id}><button className="search-result-row" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>{displayKnown(song.artist)}</small></button><button className={`favorite-toggle${favoriteIds.includes(song.id) ? ' is-favorite' : ''}`} type="button" onClick={() => toggleFavorite(song)} aria-label={favoriteIds.includes(song.id) ? `${song.title} 즐겨찾기 해제` : `${song.title} 즐겨찾기 추가`}>{favoriteIds.includes(song.id) ? '★' : '☆'}</button></div>)}</div>}
                   {searching && <p className="search-result-hint">곡을 찾고 있습니다…</p>}
                   {!searching && !searchNotice && <p className="search-result-hint">Enter를 누르면 전체 검색을 시작합니다.</p>}
                   {searchNotice && <p className={`search-result-hint ${searchNotice.kind ?? ''}`}>{searchNotice.text}</p>}
@@ -549,7 +554,7 @@ export function WorshipApp() {
                 {selected.length > 0 && <section ref={selectedQueueRef} className="editor-selected-queue" aria-labelledby="editor-selected-title"><div className="editor-heading"><h2 id="editor-selected-title">제작 목록</h2><span>{selected.length}곡</span></div><ol className="selected-list">{selected.map((song, index) => <li key={song.id}><span className="selected-index">{String(index + 1).padStart(2, '0')}</span><span className="selected-song"><strong>{song.title}</strong><small>{displayPerson(song.author)}</small></span><div className="selected-actions"><button type="button" onClick={() => moveSong(index, -1)} disabled={index === 0} aria-label={`${song.title} 위로`}>↑</button><button type="button" onClick={() => moveSong(index, 1)} disabled={index === selected.length - 1} aria-label={`${song.title} 아래로`}>↓</button><button type="button" onClick={() => setSelected((items) => items.filter((item) => item.id !== song.id))} aria-label={`${song.title} 제거`}>×</button></div></li>)}</ol></section>}
               </div> : editorTab === 'favorites' ? <div className="editor-control-group">
                 <div className="editor-heading"><h2>즐겨찾기</h2><span>{favoriteSongs.length}곡</span></div>
-                {loadingSongs ? <div className="editor-library-empty"><strong>곡 목록을 확인하고 있습니다</strong></div> : !libraryError && (favoriteSongs.length === 0 ? <div className="editor-library-empty"><strong>즐겨찾는 곡이 없습니다</strong><span>곡 검색 결과에서 별표를 눌러 추가하세요.</span></div> : <div className="editor-favorite-list">{favoriteSongs.map((song) => <div className="editor-favorite-row" key={song.id}><button className="search-result-row" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>{song.category?.toUpperCase() === 'HYMN' && song.hymnNumber ? `새찬송가 ${song.hymnNumber}장` : song.artist?.trim() || ''}</small></button><button className="favorite-toggle is-favorite" type="button" onClick={() => toggleFavorite(song)} aria-label={`${song.title} 즐겨찾기 해제`}>★</button></div>)}</div>)}
+                {loadingSongs ? <div className="editor-library-empty"><strong>곡 목록을 확인하고 있습니다</strong></div> : !libraryError && (favoriteSongs.length === 0 ? <div className="editor-library-empty"><strong>즐겨찾는 곡이 없습니다</strong><span>곡 검색 결과에서 별표를 눌러 추가하세요.</span></div> : <div className="editor-favorite-list">{favoriteSongs.map((song) => <div className="editor-favorite-row" key={song.id}><button className="search-result-row" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>{song.category?.toUpperCase() === 'HYMN' && song.hymnNumber ? `새찬송가 ${song.hymnNumber}장` : displayKnown(song.artist)}</small></button><button className="favorite-toggle is-favorite" type="button" onClick={() => toggleFavorite(song)} aria-label={`${song.title} 즐겨찾기 해제`}>★</button></div>)}</div>)}
               </div> : <div className="editor-control-group">
                 <div className="editor-heading"><h2>트렌드</h2></div>
               </div>}
