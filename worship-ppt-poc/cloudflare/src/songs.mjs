@@ -23,3 +23,20 @@ export async function searchSongs(db, title) {
   const { results } = await db.prepare(sql).bind(normalized, normalized, number, number).all();
   return results.map(row => toSong(row, true));
 }
+
+export async function getSong(db, id) {
+  const result = await db.prepare(`SELECT ${COLUMNS}, s.lyrics FROM songs s WHERE s.id = ? AND ${READY} LIMIT 1`).bind(id).first();
+  return result ? toSong(result, true) : null;
+}
+
+export async function queueMissing(db, title) {
+  const key = normalize(title);
+  const now = new Date().toISOString();
+  const sql = `INSERT INTO song_requests(title,normalized_title,lyricist,normalized_lyricist,status,request_count,created_at,updated_at,song_id)
+    VALUES(?,?,NULL,'','PENDING',1,?,?,NULL)
+    ON CONFLICT(normalized_title,normalized_lyricist) DO UPDATE SET
+      request_count = song_requests.request_count + 1, status = 'PENDING', song_id = NULL, updated_at = excluded.updated_at
+    RETURNING request_count`;
+  const result = await db.prepare(sql).bind(title.trim(), key, now, now).first();
+  return result.request_count;
+}
