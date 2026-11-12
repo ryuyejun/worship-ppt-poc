@@ -2,8 +2,7 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS songs (
  id INTEGER PRIMARY KEY, title TEXT NOT NULL, normalized_title TEXT NOT NULL,
  lyricist TEXT, composer TEXT, artist TEXT, lyrics TEXT, source_url TEXT,
- version TEXT, lyrics_status TEXT, copyright_info TEXT, permission_status TEXT,
- permission_evidence TEXT, category TEXT, hymn_number INTEGER
+ version TEXT, lyrics_status TEXT, category TEXT, hymn_number INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_songs_title ON songs(normalized_title);
 CREATE INDEX IF NOT EXISTS idx_songs_hymn ON songs(hymn_number);

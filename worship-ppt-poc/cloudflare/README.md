@@ -12,7 +12,7 @@ node cloudflare/tools/export-mysql.mjs '/path/to/mysql.properties' '/secure/path
 sqlite3 '/secure/path/yebit-backup.sqlite' 'PRAGMA integrity_check; PRAGMA foreign_key_check;'
 ```
 
-기존 MySQL에 저장된 ID, 제목, 가사와 권한 상태를 비교하고 테이블별 건수를 출력합니다. D1용 SQL 파일도 새 파일로 준비할 수 있습니다. SQL 파일에도 가사가 들어 있으므로 안전한 위치에 보관하고 Git에 올리지 마세요.
+기존 MySQL에 저장된 ID, 제목, 가사를 비교하고 테이블별 건수를 출력합니다. D1용 SQL 파일도 새 파일로 준비할 수 있습니다. SQL 파일에도 가사가 들어 있으므로 안전한 위치에 보관하고 Git에 올리지 마세요.
 
 ```sh
 node cloudflare/tools/sqlite-to-d1.mjs '/secure/path/yebit-backup.sqlite' '/secure/path/yebit-import.sql'

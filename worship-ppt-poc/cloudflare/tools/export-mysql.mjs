@@ -5,7 +5,7 @@ import mysql from 'mysql2/promise';
 const [configPath, outputPath] = process.argv.slice(2);
 if (!configPath || !outputPath) throw new Error('Usage: node tools/export-mysql.mjs <mysql.properties> <new-output.sqlite>');
 const fields = {
-  songs: ['id','title','normalized_title','lyricist','composer','artist','lyrics','source_url','version','lyrics_status','copyright_info','permission_status','permission_evidence','category','hymn_number'],
+  songs: ['id','title','normalized_title','lyricist','composer','artist','lyrics','source_url','version','lyrics_status','category','hymn_number'],
   song_aliases: ['id','song_id','alias','normalized_alias'],
   song_requests: ['id','title','normalized_title','lyricist','normalized_lyricist','status','request_count','created_at','updated_at','song_id'],
 };
@@ -31,10 +31,10 @@ try {
     const count = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
     if (count !== rows.length) throw new Error(`${table}: count mismatch`);
     if (table === 'songs') {
-      const lookup = db.prepare('SELECT lyrics, title, permission_status FROM songs WHERE id = ?');
+      const lookup = db.prepare('SELECT lyrics, title FROM songs WHERE id = ?');
       for (const row of rows) {
         const saved = lookup.get(row.id);
-        if (saved.lyrics !== row.lyrics || saved.title !== row.title || saved.permission_status !== row.permission_status) throw new Error(`Song ${row.id}: mismatch`);
+        if (saved.lyrics !== row.lyrics || saved.title !== row.title) throw new Error(`Song ${row.id}: mismatch`);
       }
       console.log(`${table}: ${count} records; ${rows.filter(row => typeof row.lyrics === 'string' && row.lyrics.trim()).length} contain lyrics`);
     } else console.log(`${table}: ${count} records`);
