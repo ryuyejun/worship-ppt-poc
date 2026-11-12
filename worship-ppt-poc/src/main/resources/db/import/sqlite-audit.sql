@@ -1,8 +1,0 @@
-CREATE TABLE IF NOT EXISTS lyric_import_audit (
-    id INTEGER PRIMARY KEY,
-    song_id INTEGER NOT NULL REFERENCES songs(id),
-    file_name TEXT NOT NULL,
-    sha256 TEXT NOT NULL,
-    imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    note TEXT NOT NULL
-);
