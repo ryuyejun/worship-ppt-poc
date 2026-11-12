@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { refreshYoutubeStatistics } from '../src/youtube-statistics.mjs';
+import { discoverChannelVideos, refreshYoutubeStatistics } from '../src/youtube-statistics.mjs';
 
 test('batches video IDs and preserves unavailable likes as null', async () => {
   const rows = Array.from({ length: 51 }, (_, index) => ({ video_id: `video${index}` }));
   const writes = [];
   const db = { prepare(sql) { return {
-    async all() { return { results: rows }; },
+    async all() { return { results: sql.includes('youtube_channels') ? [] : rows }; },
     async run() {},
     bind(...values) { return { async run() { writes.push(values); } }; },
   }; } };
@@ -27,4 +27,19 @@ test('batches video IDs and preserves unavailable likes as null', async () => {
 
 test('fails clearly when no API key is configured', async () => {
   await assert.rejects(refreshYoutubeStatistics({}, ''), /not configured/);
+});
+
+test('keeps the complete title of a medley without assigning a song', async () => {
+  const writes = [];
+  const db = { prepare() { return {
+    async all() { return { results: [{ channel_id: 'channel1' }] }; },
+    bind(...values) { return { async run() { writes.push(values); } }; },
+  }; } };
+  const fetcher = async url => ({ ok: true, async json() {
+    return { items: url.pathname.endsWith('/channels')
+      ? [{ id: 'channel1', contentDetails: { relatedPlaylists: { uploads: 'uploads1' } } }]
+      : [{ snippet: { title: '첫 찬양 + 두 번째 찬양', resourceId: { videoId: 'abcdefghijk' } } }] };
+  } });
+  await discoverChannelVideos(db, 'test-key', fetcher);
+  assert.deepEqual(writes, [['abcdefghijk', 'channel1', '첫 찬양 + 두 번째 찬양']]);
 });
