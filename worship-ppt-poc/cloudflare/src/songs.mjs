@@ -17,10 +17,12 @@ export async function listSongs(db, readyOnly) {
 export async function searchSongs(db, title) {
   if (typeof title !== 'string' || !title.trim() || title.length > 255) throw new TypeError('곡 제목을 확인해 주세요.');
   const normalized = normalize(title);
+  const relaxed = normalized.replace(/의/g, '');
+  const pattern = `%${relaxed.replace(/[\\%_]/g, '\\$&')}%`;
   const number = /^\d{1,3}$/.test(normalized) ? Number(normalized) : null;
   const sql = `SELECT ${COLUMNS}, s.lyrics FROM songs s WHERE ${READY} AND
-    (s.normalized_title = ? OR EXISTS (SELECT 1 FROM song_aliases a WHERE a.song_id = s.id AND a.normalized_alias = ?) OR (? IS NOT NULL AND s.category = 'HYMN' AND s.hymn_number = ?) OR lower(s.artist) LIKE ? COLLATE NOCASE) ORDER BY s.id LIMIT 100`;
-  const { results } = await db.prepare(sql).bind(normalized, normalized, number, number, `%${title.trim()}%`).all();
+    (s.normalized_title = ? OR EXISTS (SELECT 1 FROM song_aliases a WHERE a.song_id = s.id AND a.normalized_alias = ?) OR (? IS NOT NULL AND s.category = 'HYMN' AND s.hymn_number = ?) OR lower(s.artist) LIKE ? COLLATE NOCASE OR (? AND replace(s.normalized_title, '의', '') LIKE ? ESCAPE '\\')) ORDER BY s.id LIMIT 100`;
+  const { results } = await db.prepare(sql).bind(normalized, normalized, number, number, `%${title.trim()}%`, relaxed.length >= 2 ? 1 : 0, pattern).all();
   return results.map(row => toSong(row, true));
 }
 

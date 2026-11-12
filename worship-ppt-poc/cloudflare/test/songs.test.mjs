@@ -28,6 +28,14 @@ test('D1 검색에서 한글 정규화, 별칭, 찬송가 번호와 가사 구�
   assert.equal((await listSongs(db, true)).length, 1);
 });
 
+test('제목 일부와 조사 의 생략을 허용하되 저장된 가사가 있는 곡만 반환한다', async () => {
+  const db = fixture();
+  await db.prepare('UPDATE songs SET title = ?, normalized_title = ? WHERE id = 1').bind('하나님의 부르심', '하나님의부르심').run();
+  assert.equal((await searchSongs(db, '하나님 부르심'))[0].title, '하나님의 부르심');
+  assert.equal((await searchSongs(db, '부르심'))[0].title, '하나님의 부르심');
+  assert.deepEqual(await searchSongs(db, '%'), []);
+});
+
 test('로그인 없이 검색하고 곡 ID로 저장된 가사를 읽는다', async () => {
   const env = { DB: fixture() };
   const req = (path, body) => new Request(`https://example.test${path}`, {method:'POST', body: JSON.stringify(body)});

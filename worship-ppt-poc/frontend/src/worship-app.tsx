@@ -380,14 +380,21 @@ export function WorshipApp() {
       let found: Song[] = [];
       try {
         const headers = { 'X-User-Agent': 'WorshipPPT/1.0 (https://github.com/ryuyejun/worship-ppt-poc)' };
-        const fetchLrclib = async (key: 'track_name' | 'artist_name') => {
+        const fetchLrclib = async (key: 'track_name' | 'artist_name' | 'q', value: string) => {
           const url = new URL('https://lrclib.net/api/search');
-          url.searchParams.set(key, query.trim());
+          url.searchParams.set(key, value);
           const response = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
           if (!response.ok) throw new Error('요청 실패');
           return await response.json() as { id: number; trackName: string; artistName: string; albumName: string; plainLyrics: string | null; syncedLyrics: string | null }[];
         };
-        const records = [...await fetchLrclib('track_name'), ...await fetchLrclib('artist_name')];
+        const original = query.trim().normalize('NFC');
+        const corrected = original.replace(/하나님(?=\s|$)/g, '하나님의');
+        const searches = [fetchLrclib('track_name', original), fetchLrclib('artist_name', original), fetchLrclib('q', original)];
+        if (corrected !== original) searches.push(fetchLrclib('q', corrected));
+        const responses = await Promise.allSettled(searches);
+        const successful = responses.filter((response): response is PromiseFulfilledResult<Awaited<ReturnType<typeof fetchLrclib>>> => response.status === 'fulfilled');
+        if (!successful.length) throw new Error('요청 실패');
+        const records = successful.flatMap((response) => response.value);
         const unique = new Set<string>();
         found = records.filter((record) => {
           if (!record.plainLyrics?.trim() && !record.syncedLyrics?.trim()) return false;
