@@ -21,7 +21,14 @@ async function authenticate(request, env) {
 export default {
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
-    if (path === '/health' && request.method === 'GET') return json({ status: 'ok' });
+    if (path === '/health' && request.method === 'GET') {
+      try {
+        await env.DB.prepare('SELECT 1 AS ok').first();
+        return json({ status: 'ok', database: 'connected' });
+      } catch {
+        return json({ status: 'unavailable', database: 'unavailable' }, 503);
+      }
+    }
     if (!await authenticate(request, env)) return fail('접근 권한을 확인해 주세요.', 401);
     if (request.method !== 'POST') return fail('지원하지 않는 요청입니다.', 405);
     if (!['/songs', '/ppt-songs', '/search'].includes(path)) return fail('지원하지 않는 기능입니다.', 404);

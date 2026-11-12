@@ -54,3 +54,10 @@ test('서명·발급자·대상이 올바른 Access 토큰으로만 곡을 반�
     assert.equal(wrongAudience.status, 401);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test('상태 확인은 DB 연결 여부만 반환하며 곡을 노출하지 않는다', async () => {
+  const env = { DB: { prepare: sql => ({ first: async () => { assert.equal(sql, 'SELECT 1 AS ok'); return { ok: 1 }; } }) } };
+  const response = await worker.fetch(new Request('https://example.test/health'), env);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { status: 'ok', database: 'connected' });
+});
