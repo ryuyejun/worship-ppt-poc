@@ -540,7 +540,7 @@ export function WorshipApp() {
               </div>
             </div>
             <div className="editor-filmstrip" aria-label="슬라이드 페이지">
-              {Array.from({ length: Math.max(preview?.slideCount ?? 0, 6) }, (_, slide) => <button className={`filmstrip-page ${preview?.slideIndex === slide ? 'is-active' : ''}`} type="button" key={slide} onClick={() => setPreviewIndex(slide)} aria-label={`${slide + 1}번 슬라이드 미리보기`}><span className="filmstrip-canvas">{preview?.slideIndex === slide && <img src={`data:image/png;base64,${preview.imageBase64}`} alt="" />}</span></button>)}
+              {Array.from({ length: Math.max(preview?.slideCount ?? 0, 6) }, (_, slide) => <button className={`filmstrip-page ${preview?.slideIndex === slide ? 'is-active' : ''}`} type="button" key={slide} onClick={() => setPreviewIndex(slide)} disabled={!preview || slide >= preview.slideCount} aria-label={`${slide + 1}번 슬라이드 미리보기`} aria-current={preview?.slideIndex === slide ? 'page' : undefined}><span className="filmstrip-canvas">{preview?.slideIndex === slide && <img src={`data:image/png;base64,${preview.imageBase64}`} alt="" />}</span><span className="filmstrip-number">{slide + 1}</span></button>)}
             </div>
           </section>
           <aside className="editor-inspector" aria-label="슬라이드 편집">

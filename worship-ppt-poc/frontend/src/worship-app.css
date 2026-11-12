@@ -340,12 +340,16 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
 .preview-retry { border: 1px solid #d6dadd; border-radius: 6px; background: #fff; padding: 7px 12px; color: #1879b8; font-size: 13px; }
 .preview-spinner { width: 25px; height: 25px; margin-bottom: 6px; border: 3px solid #dcebf5; border-top-color: #2383bb; border-radius: 50%; animation: preview-spin .8s linear infinite; }
 @keyframes preview-spin { to { transform: rotate(360deg); } }
-.editor-filmstrip { position: absolute; z-index: 1; bottom: 29px; left: 47px; display: flex; width: max-content; max-width: calc(100vw - 278px); gap: 18px; overflow-x: auto; scrollbar-width: thin; }
-.filmstrip-page { display: block; flex: 0 0 181px; width: 181px; height: 102px; border: 0; background: transparent; padding: 0; text-align: left; }
+.editor-filmstrip { position: relative; z-index: 1; display: flex; flex: 0 0 126px; width: 100%; min-width: 0; gap: 18px; overflow-x: auto; overflow-y: hidden; background: #e7e7e7; padding: 1px 18px 0; scrollbar-width: thin; }
+.filmstrip-page { display: flex; flex: 0 0 181px; width: 181px; height: 126px; flex-direction: column; align-items: center; border: 0; background: transparent; padding: 0; color: #111; cursor: pointer; }
+.filmstrip-page:disabled { cursor: default; }
 .filmstrip-canvas { display: block; width: 181px; height: 102px; overflow: hidden; background: #fff; outline: 1px solid rgba(0,0,0,.025); }
 .filmstrip-canvas img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .filmstrip-page.is-active .filmstrip-canvas { outline: 2px solid #4ca9d8; outline-offset: 1px; }
-.filmstrip-page:hover .filmstrip-canvas { outline: 1px solid #777; }
+.filmstrip-page:hover:not(.is-active) .filmstrip-canvas { outline: 1px solid #777; }
+.filmstrip-number { display: grid; height: 24px; flex: 0 0 24px; place-items: center; color: #111; font-size: 16px; font-weight: 400; line-height: 1; }
+.filmstrip-page:disabled .filmstrip-number { opacity: 1; }
+.filmstrip-page:focus-visible { outline: 2px solid #2383bb; outline-offset: 2px; }
 .editor-inspector { border-left: 0; }
 .inspector-heading { display: flex; min-height: 70px; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid rgba(0,0,0,.12); padding: 12px 14px; }
 .inspector-heading h2 { margin: 0; color: #252b30; font-size: 16px; font-weight: 650; }
@@ -378,7 +382,7 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
   .editor-search { width: 100%; }
   .editor-tabs { width: calc(100% - 26px); gap: 14px; }
   .filmstrip-page, .filmstrip-canvas { width: 150px; }
-  .filmstrip-page { flex-basis: 150px; }
+  .filmstrip-page { flex-basis: 150px; height: 108px; }
   .filmstrip-canvas { height: 84px; }
 }
 @media (max-width: 860px) {
@@ -397,9 +401,9 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
   .editor-controls { overflow: visible; }
   .editor-stage { min-height: 300px; padding-bottom: 32px; }
   .editor-canvas { left: 0; width: calc(100% - 24px); }
-  .editor-filmstrip { position: relative; left: auto; bottom: auto; max-width: 100%; padding: 0 12px 12px; }
+  .editor-filmstrip { flex-basis: 95px; max-width: 100%; padding: 1px 12px 0; }
   .filmstrip-page, .filmstrip-canvas { width: 126px; }
-  .filmstrip-page { flex-basis: 126px; }
+  .filmstrip-page { flex-basis: 126px; height: 95px; }
   .filmstrip-canvas { height: 71px; }
 }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
