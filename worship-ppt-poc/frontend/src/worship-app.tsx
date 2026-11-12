@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import type { Song, SongRequest } from './types';
 
@@ -36,6 +36,9 @@ export function WorshipApp() {
   const [readySongs, setReadySongs] = useState<Song[]>([]);
   const [allSongs, setAllSongs] = useState<Song[]>([]);
   const [query, setQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchWidgetRef = useRef<HTMLDivElement>(null);
   const [libraryQuery, setLibraryQuery] = useState('');
   const [results, setResults] = useState<Song[]>([]);
   const [selected, setSelected] = useState<Song[]>([]);
@@ -132,7 +135,7 @@ export function WorshipApp() {
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') setNavOpen(false);
+      if (event.key === 'Escape') { setNavOpen(false); setSearchOpen(false); }
     }
     document.body.classList.toggle('nav-locked', navOpen);
     document.addEventListener('keydown', closeOnEscape);
@@ -141,6 +144,19 @@ export function WorshipApp() {
       document.removeEventListener('keydown', closeOnEscape);
     };
   }, [navOpen]);
+
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    function closeSearchOnOutsideClick(event: PointerEvent) {
+      if (!searchWidgetRef.current?.contains(event.target as Node)) setSearchOpen(false);
+    }
+    document.addEventListener('pointerdown', closeSearchOnOutsideClick);
+    return () => document.removeEventListener('pointerdown', closeSearchOnOutsideClick);
+  }, [searchOpen]);
 
   async function loadSongs() {
     setLoadingSongs(true);
@@ -224,6 +240,10 @@ export function WorshipApp() {
       setSearchNotice({ text: messages.join(' · ') });
     } finally { setSearching(false); }
   }
+
+  const normalizedLiveQuery = query.normalize('NFC').toLocaleLowerCase().replace(/\s+/g, '');
+  const liveSongMatches = normalizedLiveQuery ? readySongs.filter((song) => [song.title, song.author, song.artist, song.composer, song.hymnNumber?.toString()]
+    .filter(Boolean).join(' ').normalize('NFC').toLocaleLowerCase().replace(/\s+/g, '').includes(normalizedLiveQuery)).slice(0, 6) : [];
 
   function addSelection(song: Song) {
     if (song.status !== 'USER_SUPPLIED' || (song.lyrics != null && !song.lyrics.trim())) {
@@ -343,8 +363,6 @@ export function WorshipApp() {
     }
   }
 
-  const categories = useMemo(() => ({ hymns: readySongs.filter((song) => song.category?.toUpperCase() === 'HYMN').length, songs: readySongs.length }), [readySongs]);
-
   return (
     <>
       {page === 'manage' && <header className={`nav app-nav${navOpen ? ' is-open' : ''}`}>
@@ -370,27 +388,34 @@ export function WorshipApp() {
               <img src="/assets/figma/editor-logo.png" width="42" height="42" alt="" />
               <span><strong>Yebit</strong><small>찬양 라이브러리</small></span>
             </a>
-            <div className="editor-sidebar-head">
-              <div><p className="editor-kicker">예배 자료 제작</p><h1>곡 선택</h1></div>
-              <span className={`editor-connection ${libraryError ? 'is-error' : ''}`}>{loadingSongs ? '연결 중' : libraryError ? '서버 연결 필요' : `${readySongs.length}곡`}</span>
+            <div ref={searchWidgetRef} className={`editor-search-widget${searchOpen ? ' is-active' : ''}${query.trim() ? ' has-query' : ''}`}>
+              {!searchOpen ? <button className="editor-search-off" type="button" onClick={() => setSearchOpen(true)} aria-label="곡 검색 열기"><img src="/assets/figma/search.svg" alt="" /><span>search to song...</span></button> : <>
+                <form className="editor-search" onSubmit={searchSongs}>
+                  <label className="visually-hidden" htmlFor="worship-song-search">곡 제목 또는 찬송가 번호</label>
+                  <span className="editor-search-input"><img src="/assets/figma/search.svg" alt="" /><input id="worship-song-search" ref={searchInputRef} autoComplete="off" value={query} onChange={(event) => { setQuery(event.target.value); setSearchNotice(null); setResults([]); setExternalResults([]); setProviderInfo([]); }} placeholder="곡 제목 또는 찬송가 번호" /></span>
+                  <button className="visually-hidden" type="submit" disabled={searching || !query.trim()}>검색</button>
+                </form>
+                {query.trim() && <div className="editor-search-results" aria-live="polite">
+                  {liveSongMatches.length > 0 && <div className="search-result-group"><span>내 곡 목록</span>{liveSongMatches.map((song) => <button className="search-result-row" key={song.id} type="button" onClick={() => { setActiveSong(song); setSearchOpen(false); }}><strong>{song.title}</strong><small>{displayPerson(song.artist)} · 가사 저장됨</small></button>)}</div>}
+                  {searching && <p className="search-result-hint">곡을 찾고 있습니다…</p>}
+                  {!searching && !searchNotice && <p className="search-result-hint">Enter를 누르면 전체 검색을 시작합니다.</p>}
+                  {searchNotice && <p className={`search-result-hint ${searchNotice.kind ?? ''}`}>{searchNotice.text}</p>}
+                  {providerInfo.length > 0 && <div className="search-result-group"><span>추가 곡 정보 · 가사 없음</span>{providerInfo.map((song, index) => <div className="search-result-row" key={`${song.source}-${index}`}><strong>{song.title}</strong><small>{song.artist} · {song.source}</small></div>)}</div>}
+                  {externalResults.length > 0 && <div className="search-result-group"><span>LRCLIB 검색 결과 · {externalResults.length}</span>{externalResults.map((song) => <button className="search-result-row" key={song.id} type="button" onClick={() => { setActiveSong(song); setSearchOpen(false); }}><strong>{song.title}</strong><small>{displayPerson(song.artist)} · {displayPerson(song.album)}</small></button>)}</div>}
+                  {results.length > 0 && <div className="search-result-group"><span>내 곡 목록 · {results.length}</span>{results.map((song) => <button className="search-result-row" key={song.id} type="button" onClick={() => { setActiveSong(song); setSearchOpen(false); }}><strong>{song.title}</strong><small>작사 {displayPerson(song.author)}</small></button>)}</div>}
+                </div>}
+              </>}
             </div>
+            <span className={`editor-connection ${libraryError ? 'is-error' : ''}`}>{loadingSongs ? '연결 중' : libraryError ? '서버 연결 필요' : `${readySongs.length}곡`}</span>
             <div className="editor-tabs" role="group" aria-label="곡 목록">
               <button type="button" aria-pressed={editorTab === 'songs'} onClick={() => setEditorTab('songs')}>곡 검색</button>
               <button type="button" aria-pressed={editorTab === 'selected'} onClick={() => setEditorTab('selected')}>제작 목록 <span>{selected.length}</span></button>
             </div>
             <div className="editor-controls">
               {editorTab === 'songs' ? <div className="editor-control-group">
-                <div className="editor-heading"><h2>찬양 찾기</h2><span>{categories.songs}곡</span></div>
-                <form className="editor-search" onSubmit={searchSongs}>
-                  <label className="style-field"><span className="visually-hidden">곡 제목 또는 찬송가 번호</span><span className="editor-search-input"><img src="/assets/figma/search.svg" alt="" /><input autoComplete="off" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="곡 제목 또는 찬송가 번호" /></span></label>
-                  <button className="btn btn--primary" type="submit" disabled={searching || !query.trim()}>{searching ? '검색 중…' : '검색'}</button>
-                </form>
-                {searchNotice && <p className={`notice ${searchNotice.kind ?? ''}`} role="status">{searchNotice.text}</p>}
-                {providerInfo.length > 0 && <div className="result-list"><div className="result-heading">추가 곡 정보 · 가사 없음</div>{providerInfo.map((song, index) => <div className="result-row" key={`${song.source}-${index}`}><span className="result-main"><strong>{song.title}</strong><small>{song.artist} · {song.source}</small></span></div>)}</div>}
-                {externalResults.length > 0 && <div className="result-list"><div className="result-heading">LRCLIB 검색 결과 <span>{externalResults.length}</span></div>{externalResults.map((song) => <button className={`result-row ${activeSong?.id === song.id ? 'is-active' : ''}`} key={song.id} type="button" onClick={() => setActiveSong(song)}><span className="result-main"><strong>{song.title}</strong><small>가수 {displayPerson(song.artist)} · 앨범 {displayPerson(song.album)}</small></span><span className="result-meta">→</span></button>)}</div>}
-                {results.length > 0 && <div className="result-list" aria-live="polite"><div className="result-heading">검색 결과 <span>{results.length}</span></div>{results.map((song) => <button className={`result-row ${activeSong?.id === song.id ? 'is-active' : ''}`} key={song.id} type="button" onClick={() => setActiveSong(song)}><span className="result-main"><strong>{song.title}</strong><small>작사 {displayPerson(song.author)}</small></span><span className="result-meta" aria-hidden="true">→</span></button>)}</div>}
                 {activeSong && <article className="song-detail" aria-live="polite"><div className="detail-title"><div><p className="eyebrow">선택한 찬양</p><h3>{activeSong.title}</h3></div><button className="icon-button" onClick={() => setActiveSong(null)} aria-label="선택한 곡 닫기">×</button></div><dl className="song-meta"><div><dt>작사</dt><dd>{displayPerson(activeSong.author)}</dd></div><div><dt>작곡</dt><dd>{displayPerson(activeSong.composer)}</dd></div><div><dt>공연팀</dt><dd>{displayPerson(activeSong.artist)}</dd></div></dl><div className="lyrics-preview"><span>가사 미리보기</span><p>{activeSong.id < 0 ? activeSong.lyrics?.trim() : activeSong.lyrics?.trim().slice(0, 520)}{activeSong.id > 0 && (activeSong.lyrics?.length ?? 0) > 520 ? '…' : ''}</p></div>{activeSong.id < 0 && <p className="editor-hint">LRCLIB 제공 가사입니다. 곡과 가사를 확인하고 이용 권한이 있는 경우에 사용해 주세요. DB에는 저장되지 않습니다.</p>}<button className="btn btn--secondary add-button" onClick={() => addSelection(activeSong)}>제작 목록에 추가</button></article>}
-                {providerInfo.length === 0 && externalResults.length === 0 && results.length === 0 && !searching && !loadingSongs && <div className="editor-library-empty"><strong>찬양을 검색해 보세요</strong><span>제목이나 찬송가 번호로 찾을 수 있습니다.</span></div>}
+                {providerInfo.length === 0 && externalResults.length === 0 && results.length === 0 && !searching && !loadingSongs && !libraryError && <div className="editor-library-empty"><strong>찬양을 검색해 보세요</strong><span>제목이나 찬송가 번호로 찾을 수 있습니다.</span></div>}
+                {libraryError && !searching && <div className="editor-library-empty is-error"><strong>서버에 연결할 수 없습니다</strong><span>곡 검색과 미리보기를 사용하려면 백엔드 서버를 실행해 주세요.</span></div>}
               </div> : <div className="editor-control-group">
                 <div className="editor-heading"><h2>제작 목록</h2><span>{selected.length}곡 선택</span></div>
                 {selected.length === 0 ? <p className="editor-hint">곡 검색에서 찬양을 선택해 주세요.</p> : <ol className="selected-list">{selected.map((song, index) => <li key={song.id}><span className="selected-index">{String(index + 1).padStart(2, '0')}</span><span className="selected-song"><strong>{song.title}</strong><small>{displayPerson(song.author)}</small></span><div className="selected-actions"><button type="button" onClick={() => moveSong(index, -1)} disabled={index === 0} aria-label={`${song.title} 위로`}>↑</button><button type="button" onClick={() => moveSong(index, 1)} disabled={index === selected.length - 1} aria-label={`${song.title} 아래로`}>↓</button><button type="button" onClick={() => setSelected((items) => items.filter((item) => item.id !== song.id))} aria-label={`${song.title} 제거`}>×</button></div></li>)}</ol>}
@@ -398,13 +423,15 @@ export function WorshipApp() {
             </div>
           </aside>
           <section className="editor-workspace" aria-labelledby="preview-title">
-            <div className="editor-toolbar"><label className="editor-document-title"><span className="visually-hidden">프레젠테이션 제목</span><input value={presentationTitle} onChange={(event) => setPresentationTitle(event.target.value)} maxLength={80} /><img src="/assets/figma/pencil.svg" alt="" /></label><span className="editor-page-count">1280 × 720</span><button className="btn btn--primary editor-download" type="button" onClick={createPpt} disabled={creating || !selected.length}>{creating ? '만드는 중…' : '다운로드'}</button></div>
+            <div className="editor-toolbar"><label className="editor-document-title"><span className="visually-hidden">프레젠테이션 제목</span><input value={presentationTitle} onChange={(event) => setPresentationTitle(event.target.value)} maxLength={80} /><img src="/assets/figma/pencil.svg" alt="" /></label><span className="editor-page-count">1280 × 720</span></div>
             <div className="editor-stage">
               <div className={`editor-canvas ${preview && !previewLoading && !previewError ? 'has-preview' : ''}`} aria-live="polite">
-                {preview && !previewLoading && !previewError ? <img src={`data:image/png;base64,${preview.imageBase64}`} alt={`${preview.slideIndex + 1}번째 슬라이드 미리보기`} /> : <div className="editor-canvas-message">{previewLoading ? <><span className="preview-spinner" aria-hidden="true" /><strong>슬라이드를 불러오는 중</strong></> : previewError ? <><strong>미리보기를 열 수 없습니다</strong><span>{previewError}</span><button type="button" className="preview-retry" onClick={() => setPreviewRetry((value) => value + 1)}>다시 시도</button></> : <><strong>곡을 추가해 보세요</strong><span>선택한 찬양이 여기에 표시됩니다.</span></>}</div>}
+                {preview && !previewLoading && !previewError ? <img src={`data:image/png;base64,${preview.imageBase64}`} alt={`${preview.slideIndex + 1}번째 슬라이드 미리보기`} /> : previewLoading ? <div className="editor-canvas-message"><span className="preview-spinner" aria-hidden="true" /><strong>슬라이드를 불러오는 중</strong></div> : previewError ? <div className="editor-canvas-message"><strong>미리보기를 열 수 없습니다</strong><span>{previewError}</span><button type="button" className="preview-retry" onClick={() => setPreviewRetry((value) => value + 1)}>다시 시도</button></div> : null}
               </div>
             </div>
-            <div className="editor-bottom"><div className="slide-navigation" aria-label="슬라이드 이동"><button type="button" onClick={() => setPreviewIndex((index) => Math.max(0, index - 1))} disabled={!preview || previewLoading || preview.slideIndex === 0} aria-label="이전 슬라이드">←</button><span>{preview ? `${preview.slideIndex + 1} / ${preview.slideCount}` : '0 / 0'}</span><button type="button" onClick={() => setPreviewIndex((index) => index + 1)} disabled={!preview || previewLoading || preview.slideIndex >= preview.slideCount - 1} aria-label="다음 슬라이드">→</button></div><p>서버 글꼴 기준 미리보기 · PPTX와 일부 글꼴 표현이 다를 수 있습니다.</p></div>
+            <div className="editor-filmstrip" aria-label="슬라이드 페이지">
+              {Array.from({ length: Math.max(preview?.slideCount ?? 0, 6) }, (_, slide) => <button className={`filmstrip-page ${preview?.slideIndex === slide ? 'is-active' : ''}`} type="button" key={slide} onClick={() => setPreviewIndex(slide)} aria-label={`${slide + 1}번 슬라이드 미리보기`}><span className="filmstrip-canvas">{preview?.slideIndex === slide && <img src={`data:image/png;base64,${preview.imageBase64}`} alt="" />}</span></button>)}
+            </div>
           </section>
           <aside className="editor-inspector" aria-label="슬라이드 편집">
             <div className="inspector-heading"><div><p className="editor-kicker">편집 도구</p><h2>슬라이드 디자인</h2></div><span className="editor-count">{preview ? `${preview.slideIndex + 1} / ${preview.slideCount}` : '—'}</span></div>
