@@ -1,6 +1,20 @@
 import type { ApiResponse } from './types';
+import type { PresentationInput } from './presentation';
+
+export const cloudflareMode = import.meta.env.VITE_BACKEND !== 'legacy';
 
 export async function api<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<{ data: T; headers: Headers }> {
+  if (cloudflareMode && (path === '/ppt/preview' || path === '/ppt/batch')) {
+    const { collectSlides, makePresentation, renderSlide } = await import('./presentation');
+    const previewInput = body as { presentation: PresentationInput; slideIndex: number };
+    const input = path === '/ppt/preview' ? previewInput.presentation : body as PresentationInput;
+    const slides = await collectSlides(input, signal);
+    if (signal?.aborted) throw new DOMException('요청이 취소되었습니다.', 'AbortError');
+    if (path === '/ppt/batch') return { data: await makePresentation(slides, input.style) as T, headers: new Headers() };
+    const slideIndex = Math.max(0, Math.min(previewInput.slideIndex, slides.length - 1));
+    const imageBase64 = await renderSlide(slides[slideIndex], input.style);
+    return { data: { imageBase64, slideIndex, slideCount: slides.length } as T, headers: new Headers() };
+  }
   const response = await fetch(path, {
     method: 'POST',
     headers: {

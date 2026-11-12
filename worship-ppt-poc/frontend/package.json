@@ -9,18 +9,20 @@
     "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
-    "firebase": "^13.3.0",
+    "pptxgenjs": "^4.0.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.7",
+    "jszip": "^3.10.2",
     "tsx": "^4.23.15",
     "typescript": "~5.8.3",
     "vite": "^6.3.5"
   },
   "overrides": {
-    "@grpc/grpc-js": "^1.14.7"
+    "@grpc/grpc-js": "^1.14.7",
+    "image-size": "^2.1.0"
   }
 }

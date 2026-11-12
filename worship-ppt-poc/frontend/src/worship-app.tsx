@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api } from './api';
+import { api, cloudflareMode } from './api';
 import type { Song, SongRequest } from './types';
 
 type Notice = { text: string; kind?: 'error' | 'success' } | null;
@@ -129,6 +129,11 @@ export function WorshipApp() {
 
   function selectSong(song: Song, closeSearch = true) {
     setActiveSong(song);
+    if (cloudflareMode && song.id > 0 && !song.lyrics) {
+      void api<Song>('/song', { id: song.id }).then(({ data }) => {
+        setActiveSong((current) => current?.id === song.id ? data : current);
+      }).catch(() => setSearchNotice({ text: '선택한 곡의 가사를 불러오지 못했습니다.', kind: 'error' }));
+    }
     setEditorTab('songs');
     if (closeSearch) setSearchOpen(false);
     if (song.id > 0) {
@@ -280,6 +285,16 @@ export function WorshipApp() {
     setSearching(true); setResults([]); setExternalResults([]); setProviderInfo([]); setActiveSong(null); setSearchNotice(null);
     const messages: string[] = [];
     try {
+      if (cloudflareMode && /^\d{1,3}$/.test(query.trim())) {
+        try {
+          const local = await api<Song[]>('/search', { title: query.trim() });
+          setResults(local.data);
+          if (local.data.length === 1) selectSong(local.data[0], false);
+          setSearchNotice({ text: local.data.length ? `찬송가 ${local.data.length}곡을 찾았습니다` : '찬송가를 찾지 못해 대기열에 기록했습니다' });
+          if (!local.data.length) await loadRequests();
+        } catch { setSearchNotice({ text: '찬송가를 불러오지 못했습니다.', kind: 'error' }); }
+        return;
+      }
       let found: Song[] = [];
       try {
         const url = new URL('https://lrclib.net/api/search');
@@ -319,7 +334,10 @@ export function WorshipApp() {
         setResults(local.data);
         messages.push(`내 DB: 가사 ${local.data.length}곡`);
         if (local.data.length === 1) selectSong(local.data[0], false);
-        if (!local.data.length) { messages.push('곡 추가 대기열에 기록했습니다'); await loadRequests(); }
+        if (!local.data.length) {
+          if (cloudflareMode && !local.headers.has('X-Request-Count')) messages.push('저장된 가사를 찾지 못했습니다');
+          else { messages.push('곡 추가 대기열에 기록했습니다'); await loadRequests(); }
+        }
       } catch { messages.push('내 DB: 조회 실패'); }
       setSearchNotice({ text: messages.join(' · ') });
     } finally { setSearching(false); }
@@ -327,7 +345,8 @@ export function WorshipApp() {
 
   const normalizedLiveQuery = query.normalize('NFC').toLocaleLowerCase().replace(/\s+/g, '');
   const liveSongMatches = normalizedLiveQuery ? readySongs.filter((song) => [song.title, song.author, song.artist, song.composer, song.hymnNumber?.toString()]
-    .filter(Boolean).join(' ').normalize('NFC').toLocaleLowerCase().replace(/\s+/g, '').includes(normalizedLiveQuery)).slice(0, 6) : [];
+    .filter(Boolean).join(' ').normalize('NFC').toLocaleLowerCase().replace(/\s+/g, '').includes(normalizedLiveQuery))
+    .sort((a, b) => Number(b.hymnNumber?.toString() === normalizedLiveQuery) - Number(a.hymnNumber?.toString() === normalizedLiveQuery)).slice(0, 6) : [];
 
   function addSelection(song: Song) {
     if (song.status !== 'USER_SUPPLIED' || (song.lyrics != null && !song.lyrics.trim())) {
