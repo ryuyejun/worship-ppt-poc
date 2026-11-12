@@ -11,6 +11,7 @@ export default defineConfig({
       '/requests': apiTarget,
       '/batch-import': apiTarget,
       '/ppt': apiTarget,
+      '/song-artwork': apiTarget,
       '/local-token.js': apiTarget,
       '/logo.png': apiTarget,
     },

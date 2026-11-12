@@ -284,14 +284,17 @@ footer.app-footer.closing { height: auto; min-height: 0; padding: 18px 40px 20px
 .editor-control-group { display: grid; align-content: start; gap: 10px; }
 .recent-song-section { display: grid; align-content: start; gap: 10px; }
 .recent-song-list { display: grid; gap: 10px; }
-.recent-song-card { position: relative; display: flex; width: 100%; height: 90px; overflow: hidden; border: 0; border-radius: 5px; background: #d8d8d8; padding: 5px; text-align: left; cursor: pointer; }
+.recent-song-card-shell { position: relative; min-width: 0; }
+.recent-song-card { position: relative; display: flex; width: 100%; height: 90px; overflow: hidden; border: 0; border-radius: 5px; background: linear-gradient(135deg,#e3e8ec,#d7dde2 55%,#e8ecef); padding: 5px; }
 .recent-song-card__image { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 5px; object-fit: cover; }
 .recent-song-card__glass { position: relative; z-index: 1; display: flex; width: 100%; min-width: 0; flex: 1; flex-direction: column; gap: 4px; overflow: hidden; border-radius: 5px; background: rgba(255,255,255,.5); padding: 10px; color: #111; -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); white-space: nowrap; }
-.recent-song-card__glass strong { overflow: hidden; font-size: 16px; font-weight: 600; line-height: 1.2; text-overflow: ellipsis; }
-.recent-song-card__glass small { overflow: hidden; font-size: 8px; font-weight: 400; line-height: 1.2; text-overflow: ellipsis; }
-.recent-song-card:hover .recent-song-card__glass { background: rgba(255,255,255,.58); }
-.recent-song-card--empty { cursor: default; }
-.recent-song-card--empty:hover .recent-song-card__glass { background: rgba(255,255,255,.5); }
+.recent-song-card__title { align-self: stretch; overflow: hidden; border: 0; background: transparent; padding: 0; color: inherit; text-align: left; cursor: pointer; }
+.recent-song-card__glass strong { display: block; overflow: hidden; font-size: 16px; font-weight: 600; line-height: 1.2; text-overflow: ellipsis; }
+.recent-song-card__meta { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 5px; }
+.recent-song-card__meta small, .recent-song-card__meta a { overflow: hidden; color: #4f5962; font-size: 8px; font-weight: 400; line-height: 1.2; text-decoration: none; text-overflow: ellipsis; }
+.recent-song-card__meta a { flex: 0 1 auto; text-decoration: underline; text-underline-offset: 2px; }
+.recent-song-card__meta a:hover { color: #243d53; }
+.recent-song-card--empty { background: linear-gradient(135deg,#e3e8ec,#d7dde2 55%,#e8ecef); }
 .editor-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .editor-heading h2 { margin: 0; color: #252b30; font-size: 14px; font-weight: 650; }
 .editor-search em { color: #526b80; font-style: normal; }

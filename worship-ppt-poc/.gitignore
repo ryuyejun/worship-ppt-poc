@@ -6,6 +6,7 @@ frontend/.vite/
 frontend/.taste-skill/profile*/
 frontend/.taste-skill/shots/
 .server/
+data/artwork/
 .idea/
 .DS_Store
 .backups/
