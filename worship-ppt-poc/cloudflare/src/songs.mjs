@@ -19,8 +19,8 @@ export async function searchSongs(db, title) {
   const normalized = normalize(title);
   const number = /^\d{1,3}$/.test(normalized) ? Number(normalized) : null;
   const sql = `SELECT ${COLUMNS}, s.lyrics FROM songs s WHERE ${READY} AND
-    (s.normalized_title = ? OR EXISTS (SELECT 1 FROM song_aliases a WHERE a.song_id = s.id AND a.normalized_alias = ?) OR (? IS NOT NULL AND s.category = 'HYMN' AND s.hymn_number = ?)) ORDER BY s.id LIMIT 100`;
-  const { results } = await db.prepare(sql).bind(normalized, normalized, number, number).all();
+    (s.normalized_title = ? OR EXISTS (SELECT 1 FROM song_aliases a WHERE a.song_id = s.id AND a.normalized_alias = ?) OR (? IS NOT NULL AND s.category = 'HYMN' AND s.hymn_number = ?) OR lower(s.artist) LIKE ? COLLATE NOCASE) ORDER BY s.id LIMIT 100`;
+  const { results } = await db.prepare(sql).bind(normalized, normalized, number, number, `%${title.trim()}%`).all();
   return results.map(row => toSong(row, true));
 }
 

@@ -325,11 +325,15 @@ export function WorshipApp() {
       }
       let found: Song[] = [];
       try {
-        const url = new URL('https://lrclib.net/api/search');
-        url.searchParams.set('track_name', query.trim());
-        const response = await fetch(url, { headers: { 'X-User-Agent': 'WorshipPPT/1.0 (https://github.com/ryuyejun/worship-ppt-poc)' }, signal: AbortSignal.timeout(8000) });
-        if (!response.ok) throw new Error('요청 실패');
-        const records = await response.json() as { id: number; trackName: string; artistName: string; albumName: string; plainLyrics: string | null; syncedLyrics: string | null }[];
+        const headers = { 'X-User-Agent': 'WorshipPPT/1.0 (https://github.com/ryuyejun/worship-ppt-poc)' };
+        const fetchLrclib = async (key: 'track_name' | 'artist_name') => {
+          const url = new URL('https://lrclib.net/api/search');
+          url.searchParams.set(key, query.trim());
+          const response = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
+          if (!response.ok) throw new Error('요청 실패');
+          return await response.json() as { id: number; trackName: string; artistName: string; albumName: string; plainLyrics: string | null; syncedLyrics: string | null }[];
+        };
+        const records = [...await fetchLrclib('track_name'), ...await fetchLrclib('artist_name')];
         const unique = new Set<string>();
         found = records.filter((record) => {
           if (!record.plainLyrics?.trim() && !record.syncedLyrics?.trim()) return false;
@@ -345,7 +349,7 @@ export function WorshipApp() {
       } catch { messages.push('LRCLIB: 연결 실패'); }
       if (found.length) {
         setExternalResults(found);
-        setSearchNotice({ text: messages.join(' · ') + ' · 작사자는 확인할 수 없으므로 가수와 가사를 확인해 주세요.' });
+        setSearchNotice({ text: messages.join(' · ') + ' · 검색어와 가수 이름이 일치하는 곡입니다.' });
         return;
       }
       try {
