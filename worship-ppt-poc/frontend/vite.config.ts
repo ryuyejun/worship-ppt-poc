@@ -6,6 +6,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/search': apiTarget,
+      '/providers': apiTarget,
       '/songs': apiTarget,
       '/ppt-songs': apiTarget,
       '/requests': apiTarget,
