@@ -18,7 +18,7 @@ export async function discoverChannelVideos(db, apiKey, fetcher = fetch) {
       if (!ids.includes(channel.id)) continue;
       const playlistId = channel.contentDetails?.relatedPlaylists?.uploads;
       if (!playlistId) continue;
-      const videos = await youtubeGet('playlistItems', { part: 'snippet', playlistId, maxResults: '10' }, apiKey, fetcher);
+      const videos = await youtubeGet('playlistItems', { part: 'snippet', playlistId, maxResults: '50' }, apiKey, fetcher);
       const statements = [];
       for (const video of videos) {
         const videoId = video.snippet?.resourceId?.videoId;
