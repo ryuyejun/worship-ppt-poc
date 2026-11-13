@@ -431,9 +431,12 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
 @media (prefers-reduced-motion: reduce) {
   .editor-search-widget { transition: none; }
 }
-.editor-size-control { position:absolute; top:20px; left:206px; z-index:5; }
-.editor-size-control .editor-page-count { position:static; cursor:pointer; }
-.editor-size-menu { position:absolute; top:38px; left:0; width:260px; border:1px solid #d5dadd; border-radius:8px; background:#fff; padding:12px; box-shadow:0 8px 24px rgba(0,0,0,.14); }
+.editor-size-control { position:absolute; top:10px; left:206px; z-index:5; }
+.editor-size-control .editor-page-count { position:static; display:flex; width:230px; height:50px; align-items:center; justify-content:space-between; gap:12px; border:0; border-radius:13px; background:#f0f0f3; padding:0 14px; color:#64697a; font-size:23px; font-weight:500; letter-spacing:-.035em; white-space:nowrap; cursor:pointer; transition:background-color .18s ease; }
+.editor-size-control .editor-page-count:hover { background:#e9e9ed; }
+.editor-size-control .editor-page-count:focus-visible { outline:2px solid #85b9d8; outline-offset:2px; }
+.editor-page-count svg { width:20px; height:20px; flex:0 0 20px; }
+.editor-size-menu { position:absolute; top:58px; left:0; width:260px; border:1px solid #e1e3e7; border-radius:10px; background:#fff; padding:12px; box-shadow:0 8px 24px rgba(0,0,0,.12); }
 .editor-size-presets { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
 .editor-size-presets button { border:1px solid #d8dde0; border-radius:5px; background:#fff; padding:8px 3px; color:#252b30; cursor:pointer; }
 .editor-size-presets button[aria-pressed="true"] { border-color:#2383bb; background:#edf7fc; }
