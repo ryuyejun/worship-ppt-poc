@@ -43,15 +43,23 @@ export async function findArtwork(db, songId, apiKey, externalTitle) {
   if (!apiKey) return unavailable(songId);
   let image = null; let type = null; let source = null; let contributor = null;
   const searchResults = [];
+  let successfulSearch = false;
   for (const search of [{ term: song.title.slice(0, 100), lang: 'ko' }, { term: 'worship church', lang: 'en' }]) {
     const query = new URL('https://pixabay.com/api/');
     query.searchParams.set('key', apiKey); query.searchParams.set('q', search.term);
     query.searchParams.set('lang', search.lang); query.searchParams.set('image_type', 'photo'); query.searchParams.set('category', 'religion');
     query.searchParams.set('orientation', 'horizontal'); query.searchParams.set('safesearch', 'true'); query.searchParams.set('per_page', '3');
-    const result = await fetch(query, { signal: AbortSignal.timeout(8000) });
-    if (!result.ok) throw new Error('Pixabay search failed');
+    let result;
+    try {
+      result = await fetch(query, { signal: AbortSignal.timeout(8000) });
+      if (!result.ok) { searchResults.push({ term: search.term, status: result.status }); continue; }
+    } catch {
+      searchResults.push({ term: search.term, status: 'unavailable' });
+      continue;
+    }
     const data = await result.json();
-    if (!data || !Array.isArray(data.hits)) throw new Error('Invalid Pixabay response');
+    if (!data || !Array.isArray(data.hits)) { searchResults.push({ term: search.term, status: 'invalid-response' }); continue; }
+    successfulSearch = true;
     searchResults.push({ term: search.term, result: data });
     for (const hit of data.hits) {
       if (!allowedUrl(hit?.webformatURL) || !allowedUrl(hit?.pageURL)) continue;
@@ -65,6 +73,7 @@ export async function findArtwork(db, songId, apiKey, externalTitle) {
     }
     if (image) break;
   }
+  if (!successfulSearch) return unavailable(songId);
   await db.prepare(`INSERT INTO ${table}(song_id,song_title,fetched_at,search_response,image_data,image_type,source_url,contributor)
     VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(song_id) DO UPDATE SET song_title=excluded.song_title, fetched_at=excluded.fetched_at,
     search_response=excluded.search_response, image_data=excluded.image_data, image_type=excluded.image_type,

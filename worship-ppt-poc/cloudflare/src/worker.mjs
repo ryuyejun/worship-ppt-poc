@@ -41,7 +41,9 @@ export default {
     ctx.waitUntil((async () => {
       await refreshYoutubeStatistics(env.DB, env.YOUTUBE_API_KEY);
       const songs = await getTrendingSongs(env.DB);
-      await Promise.allSettled(songs.map(song => findArtwork(env.DB, song.songId, env.PIXABAY_API_KEY, song.title)));
+      for (let index = 0; index < songs.length; index += 3) {
+        await Promise.allSettled(songs.slice(index, index + 3).map(song => findArtwork(env.DB, song.songId, env.PIXABAY_API_KEY, song.title)));
+      }
     })());
   },
   async fetch(request, env) {

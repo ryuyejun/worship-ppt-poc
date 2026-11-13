@@ -68,6 +68,8 @@ export function WorshipApp() {
   const searchWidgetRef = useRef<HTMLDivElement>(null);
   const selectedQueueRef = useRef<HTMLElement>(null);
   const artworkAttempts = useRef(new Set<string>());
+  const artworkQueue = useRef<Pick<Song, 'id' | 'title'>[]>([]);
+  const activeArtworkRequests = useRef(0);
   const [libraryQuery, setLibraryQuery] = useState('');
   const [results, setResults] = useState<Song[]>([]);
   const [selected, setSelected] = useState<Song[]>([]);
@@ -212,6 +214,9 @@ export function WorshipApp() {
         sourceUrl: response.data.sourceUrl ?? undefined,
         contributor: response.data.contributor ?? undefined,
       };
+      const image = new Image();
+      image.src = artwork.imageUrl;
+      await image.decode().catch(() => undefined);
       setFavoriteArtwork((items) => ({ ...items, [song.id]: artwork }));
       setRecentSongs((songs) => songs.map((recent) => recent.id === song.id ? {
         ...recent,
@@ -224,11 +229,24 @@ export function WorshipApp() {
     }
   }
 
+  function processArtworkQueue() {
+    while (activeArtworkRequests.current < 3 && artworkQueue.current.length > 0) {
+      const song = artworkQueue.current.shift();
+      if (!song) continue;
+      activeArtworkRequests.current++;
+      void loadSongArtwork(song).finally(() => {
+        activeArtworkRequests.current--;
+        processArtworkQueue();
+      });
+    }
+  }
+
   function requestSongArtwork(song: Pick<Song, 'id' | 'title'>) {
     const key = `${song.id}:${song.title}`;
     if (artworkAttempts.current.has(key)) return;
     artworkAttempts.current.add(key);
-    void loadSongArtwork(song);
+    artworkQueue.current.push(song);
+    processArtworkQueue();
   }
 
   function toggleFavorite(song: Song) {
