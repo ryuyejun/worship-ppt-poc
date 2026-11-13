@@ -205,10 +205,21 @@ export function WorshipApp() {
     setRecentSongs((songs) => [{ ...songs.find((recent) => recent.id === song.id && recent.title === song.title), id: song.id, title: song.title, artist: song.artist, selectedAt: Date.now() }, ...songs.filter((recent) => recent.id !== song.id)].slice(0, 12));
   }
 
-  async function selectTrendingSong(songId: number) {
+  async function searchTrendingSong(songId: number) {
     const loadedSong = readySongs.find((song) => song.id === songId) ?? allSongs.find((song) => song.id === songId);
+    const showSearchResult = (song: Song) => {
+      setQuery(song.title);
+      setSearchOpen(true);
+      setActiveSong(null);
+      setResults([song]);
+      setExternalResults([]);
+      setProviderInfo([]);
+      setSearchNotice(null);
+      setEditorTab('songs');
+    };
+
     if (loadedSong) {
-      selectSong(loadedSong);
+      showSearchResult(loadedSong);
       return;
     }
 
@@ -216,13 +227,15 @@ export function WorshipApp() {
       const response = await api<Song[]>('/songs');
       setAllSongs(response.data);
       const song = response.data.find((item) => item.id === songId);
-      if (song) {
-        selectSong(song);
-        return;
+      if (song) showSearchResult(song);
+      else {
+        setQuery('');
+        setSearchOpen(true);
+        setEditorTab('songs');
+        setSearchNotice({ text: '등록된 곡을 찾을 수 없습니다.', kind: 'error' });
       }
-      setEditorTab('songs');
-      setSearchNotice({ text: '선택한 트렌드 곡을 곡 목록에서 찾을 수 없습니다.', kind: 'error' });
     } catch {
+      setSearchOpen(true);
       setEditorTab('songs');
       setSearchNotice({ text: '곡 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.', kind: 'error' });
     }
@@ -495,6 +508,7 @@ export function WorshipApp() {
   const liveSongMatches = normalizedLiveQuery ? readySongs.filter((song) => [song.title, song.author, song.artist, song.composer, song.hymnNumber?.toString()]
     .filter(Boolean).join(' ').normalize('NFC').toLocaleLowerCase().replace(/\s+/g, '').includes(normalizedLiveQuery))
     .sort((a, b) => Number(b.hymnNumber?.toString() === normalizedLiveQuery) - Number(a.hymnNumber?.toString() === normalizedLiveQuery)).slice(0, 6) : [];
+  const additionalLiveSongMatches = liveSongMatches.filter((song) => !results.some((result) => result.id === song.id));
 
   function addSelection(song: Song) {
     if (song.status !== 'USER_SUPPLIED' || (song.lyrics != null && !song.lyrics.trim())) {
@@ -649,7 +663,7 @@ export function WorshipApp() {
                   <button className="visually-hidden" type="submit" disabled={searching || !query.trim()}>검색</button>
                 </form>
                 {query.trim() && <div className="editor-search-results" aria-live="polite">
-                  {liveSongMatches.length > 0 && <div className="search-result-group"><span>내 곡 목록</span>{liveSongMatches.map((song) => <div className="editor-favorite-row" key={song.id}><button className="search-result-row" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>{displayKnown(song.artist)}</small></button><button className={`favorite-toggle${favoriteIds.includes(song.id) ? ' is-favorite' : ''}`} type="button" onClick={() => toggleFavorite(song)} aria-label={favoriteIds.includes(song.id) ? `${song.title} 즐겨찾기 해제` : `${song.title} 즐겨찾기 추가`}>{favoriteIds.includes(song.id) ? '★' : '☆'}</button></div>)}</div>}
+                  {additionalLiveSongMatches.length > 0 && <div className="search-result-group"><span>내 곡 목록</span>{additionalLiveSongMatches.map((song) => <div className="editor-favorite-row" key={song.id}><button className="search-result-row" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>{displayKnown(song.artist)}</small></button><button className={`favorite-toggle${favoriteIds.includes(song.id) ? ' is-favorite' : ''}`} type="button" onClick={() => toggleFavorite(song)} aria-label={favoriteIds.includes(song.id) ? `${song.title} 즐겨찾기 해제` : `${song.title} 즐겨찾기 추가`}>{favoriteIds.includes(song.id) ? '★' : '☆'}</button></div>)}</div>}
                   {searching && <p className="search-result-hint">곡을 찾고 있습니다…</p>}
                   {!searching && !searchNotice && <p className="search-result-hint">Enter를 누르면 전체 검색을 시작합니다.</p>}
                   {searchNotice && <p className={`search-result-hint ${searchNotice.kind ?? ''}`}>{searchNotice.text}</p>}
@@ -679,7 +693,7 @@ export function WorshipApp() {
               <div className={`editor-control-group trend-panel${editorTab === 'trending' ? ' is-visible' : ' is-preloaded'}`} aria-hidden={editorTab !== 'trending'}>
                 <div className="editor-heading"><h2>찬양 곡</h2><span>{youtubeVideos.length}곡</span></div>
                 <p className="trend-source-note">일치한 영상 조회수 기준 상위 30곡 · 주 1회 갱신 · 여러 곡이 담긴 영상은 영상 전체 통계</p>
-                {youtubeStatus === 'loading' ? <p className="trend-source-note">곡 정보를 불러오는 중입니다.</p> : youtubeStatus === 'error' ? <p className="trend-source-note">곡 정보를 불러오지 못했습니다.</p> : youtubeVideos.length ? <ul className="local-trend-list">{youtubeVideos.map((video, index) => <li key={video.videoId}><span className="local-trend-rank" aria-label={`${index + 1}번째 곡`}>{index + 1}</span><button type="button" className="local-trend-song" onClick={() => void selectTrendingSong(video.songId)}>{(favoriteArtwork[video.songId]?.imageUrl || video.artworkUrl) && <img className="local-trend-artwork" src={favoriteArtwork[video.songId]?.imageUrl || video.artworkUrl || undefined} alt="" />}<span className="local-trend-song__text"><strong>{video.title}</strong><small>조회 {video.views == null ? '정보 없음' : video.views.toLocaleString('ko-KR')} · 좋아요 {video.likes == null ? '정보 없음' : video.likes.toLocaleString('ko-KR')}</small></span></button></li>)}</ul> : <div className="editor-library-empty"><strong>일치하는 곡이 없습니다</strong><span>확인된 곡이 있으면 여기에 표시됩니다.</span></div>}
+                {youtubeStatus === 'loading' ? <p className="trend-source-note">곡 정보를 불러오는 중입니다.</p> : youtubeStatus === 'error' ? <p className="trend-source-note">곡 정보를 불러오지 못했습니다.</p> : youtubeVideos.length ? <ul className="local-trend-list">{youtubeVideos.map((video, index) => <li key={video.videoId}><span className="local-trend-rank" aria-label={`${index + 1}번째 곡`}>{index + 1}</span><button type="button" className="local-trend-song" onClick={() => void searchTrendingSong(video.songId)}>{(favoriteArtwork[video.songId]?.imageUrl || video.artworkUrl) && <img className="local-trend-artwork" src={favoriteArtwork[video.songId]?.imageUrl || video.artworkUrl || undefined} alt="" />}<span className="local-trend-song__text"><strong>{video.title}</strong><small>조회 {video.views == null ? '정보 없음' : video.views.toLocaleString('ko-KR')} · 좋아요 {video.likes == null ? '정보 없음' : video.likes.toLocaleString('ko-KR')}</small></span></button></li>)}</ul> : <div className="editor-library-empty"><strong>일치하는 곡이 없습니다</strong><span>확인된 곡이 있으면 여기에 표시됩니다.</span></div>}
               </div>
             </div>
           </aside>
