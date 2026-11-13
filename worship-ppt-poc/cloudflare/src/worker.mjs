@@ -8,6 +8,15 @@ const fail = (message, status) => json({ success: false, data: null, error: mess
 const ok = data => json({ success: true, data, error: null });
 const routes = new Set(['/songs', '/ppt-songs', '/search', '/song', '/requests', '/providers/search', '/song-artwork/search', '/youtube-videos']);
 
+async function getTrendingSongs(db) {
+  const { results: videos } = await db.prepare(`SELECT v.video_id AS videoId, v.video_title AS videoTitle, s.view_count AS views, s.like_count AS likes, s.fetched_at AS fetchedAt
+    FROM youtube_videos v JOIN youtube_video_statistics s ON s.video_id = v.video_id
+    WHERE v.enabled = 1 AND v.video_title IS NOT NULL AND datetime(s.fetched_at) >= datetime('now', '-30 days')
+    ORDER BY v.rowid DESC LIMIT 1000`).all();
+  const { results: songs } = await db.prepare('SELECT id, title FROM songs WHERE title IS NOT NULL').all();
+  return matchSongVideos(videos, songs);
+}
+
 async function readInput(request) {
   if (Number(request.headers.get('content-length') || 0) > 4096) return null;
   if (!request.body) return '';
@@ -29,7 +38,11 @@ async function readInput(request) {
 
 export default {
   async scheduled(_event, env, ctx) {
-    ctx.waitUntil(refreshYoutubeStatistics(env.DB, env.YOUTUBE_API_KEY));
+    ctx.waitUntil((async () => {
+      await refreshYoutubeStatistics(env.DB, env.YOUTUBE_API_KEY);
+      const songs = await getTrendingSongs(env.DB);
+      await Promise.allSettled(songs.map(song => findArtwork(env.DB, song.songId, env.PIXABAY_API_KEY, song.title)));
+    })());
   },
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
@@ -57,14 +70,7 @@ export default {
       let input;
       try { input = text ? JSON.parse(text) : {}; } catch { return fail('요청 형식을 확인해 주세요.', 400); }
       if (path === '/songs') return ok(await listSongs(env.DB, false));
-      if (path === '/youtube-videos') {
-        const { results } = await env.DB.prepare(`SELECT v.video_id AS videoId, v.video_title AS videoTitle, s.view_count AS views, s.like_count AS likes, s.fetched_at AS fetchedAt
-          FROM youtube_videos v JOIN youtube_video_statistics s ON s.video_id = v.video_id
-          WHERE v.enabled = 1 AND v.video_title IS NOT NULL AND datetime(s.fetched_at) >= datetime('now', '-30 days')
-          ORDER BY v.rowid DESC LIMIT 1000`).all();
-        const songs = await env.DB.prepare('SELECT id, title FROM songs WHERE title IS NOT NULL').all();
-        return ok(matchSongVideos(results, songs.results));
-      }
+      if (path === '/youtube-videos') return ok(await getTrendingSongs(env.DB));
       if (path === '/ppt-songs') return ok(await listSongs(env.DB, true));
       if (path === '/search') {
         const songs = await searchSongs(env.DB, input?.title);

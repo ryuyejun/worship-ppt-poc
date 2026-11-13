@@ -1,6 +1,6 @@
 const MAX_IMAGE_BYTES = 900_000;
 const CACHE_MILLISECONDS = 24 * 60 * 60 * 1000;
-const SEARCH_VERSION = 2;
+const SEARCH_VERSION = 3;
 const unavailable = songId => ({ available: false, songId, imageUrl: null, sourceUrl: null, contributor: null });
 const allowedUrl = value => {
   try { const url = new URL(value); return url.protocol === 'https:' && (url.hostname === 'pixabay.com' || url.hostname.endsWith('.pixabay.com')); }
@@ -41,29 +41,35 @@ export async function findArtwork(db, songId, apiKey, externalTitle) {
   if (currentSearch && cached.image_type) return responseFor(songId, cached);
   if (currentSearch && Date.now() - Date.parse(cached.fetched_at) < CACHE_MILLISECONDS) return unavailable(songId);
   if (!apiKey) return unavailable(songId);
-  const query = new URL('https://pixabay.com/api/');
-  query.searchParams.set('key', apiKey); query.searchParams.set('q', song.title.slice(0, 100));
-  query.searchParams.set('lang', 'ko'); query.searchParams.set('image_type', 'photo'); query.searchParams.set('category', 'religion');
-  query.searchParams.set('orientation', 'horizontal'); query.searchParams.set('safesearch', 'true'); query.searchParams.set('per_page', '3');
-  const result = await fetch(query, { signal: AbortSignal.timeout(8000) });
-  if (!result.ok) throw new Error('Pixabay search failed');
-  const data = await result.json();
-  if (!data || !Array.isArray(data.hits)) throw new Error('Invalid Pixabay response');
   let image = null; let type = null; let source = null; let contributor = null;
-  const first = data.hits.find(hit => allowedUrl(hit?.webformatURL) && allowedUrl(hit?.pageURL));
-  if (first) {
-    const download = await fetch(first.webformatURL, { signal: AbortSignal.timeout(10000) });
-    const mime = (download.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-    if (download.ok && allowedUrl(download.url) && ['image/jpeg','image/png','image/webp'].includes(mime)) {
+  const searchResults = [];
+  for (const search of [{ term: song.title.slice(0, 100), lang: 'ko' }, { term: 'worship church', lang: 'en' }]) {
+    const query = new URL('https://pixabay.com/api/');
+    query.searchParams.set('key', apiKey); query.searchParams.set('q', search.term);
+    query.searchParams.set('lang', search.lang); query.searchParams.set('image_type', 'photo'); query.searchParams.set('category', 'religion');
+    query.searchParams.set('orientation', 'horizontal'); query.searchParams.set('safesearch', 'true'); query.searchParams.set('per_page', '3');
+    const result = await fetch(query, { signal: AbortSignal.timeout(8000) });
+    if (!result.ok) throw new Error('Pixabay search failed');
+    const data = await result.json();
+    if (!data || !Array.isArray(data.hits)) throw new Error('Invalid Pixabay response');
+    searchResults.push({ term: search.term, result: data });
+    for (const hit of data.hits) {
+      if (!allowedUrl(hit?.webformatURL) || !allowedUrl(hit?.pageURL)) continue;
+      const download = await fetch(hit.webformatURL, { signal: AbortSignal.timeout(10000) });
+      const mime = (download.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+      if (!download.ok || !allowedUrl(download.url) || !['image/jpeg','image/png','image/webp'].includes(mime)) continue;
       image = await imageBytes(download);
-      if (image) { type = mime; source = first.pageURL; contributor = String(first.user || '').slice(0, 200); }
+      if (!image) continue;
+      type = mime; source = hit.pageURL; contributor = String(hit.user || '').slice(0, 200);
+      break;
     }
+    if (image) break;
   }
   await db.prepare(`INSERT INTO ${table}(song_id,song_title,fetched_at,search_response,image_data,image_type,source_url,contributor)
     VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(song_id) DO UPDATE SET song_title=excluded.song_title, fetched_at=excluded.fetched_at,
     search_response=excluded.search_response, image_data=excluded.image_data, image_type=excluded.image_type,
     source_url=excluded.source_url, contributor=excluded.contributor`)
-    .bind(songId, song.title, new Date().toISOString(), JSON.stringify({ searchVersion: SEARCH_VERSION, result: data }), image ? image.buffer : null, type, source, contributor).run();
+    .bind(songId, song.title, new Date().toISOString(), JSON.stringify({ searchVersion: SEARCH_VERSION, results: searchResults }), image ? image.buffer : null, type, source, contributor).run();
   return responseFor(songId, { image_type:type, source_url:source, contributor });
 }
 

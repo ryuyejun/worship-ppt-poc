@@ -140,12 +140,10 @@ export function WorshipApp() {
   const validStyle = Boolean(pptStyle.fontFamily.trim()) && pptStyle.fontFamily.length <= 80 && Number.isInteger(pptStyle.fontSize) && pptStyle.fontSize >= 16 && pptStyle.fontSize <= 100 && Number.isInteger(pptStyle.linesPerSlide) && pptStyle.linesPerSlide >= 1 && pptStyle.linesPerSlide <= 6;
   const favoriteSongs = readySongs.filter((song) => favoriteIds.includes(song.id));
   useEffect(() => {
-    if (editorTab !== 'trending') return;
     let cancelled = false;
-    setYoutubeStatus('loading');
     api<typeof youtubeVideos>('/youtube-videos').then(({ data }) => { if (!cancelled) { setYoutubeVideos(data); setYoutubeStatus('ready'); } }).catch(() => { if (!cancelled) setYoutubeStatus('error'); });
     return () => { cancelled = true; };
-  }, [editorTab]);
+  }, []);
 
   useEffect(() => {
     try {
@@ -184,13 +182,12 @@ export function WorshipApp() {
   }, [favoriteSongs, favoriteArtwork]);
 
   useEffect(() => {
-    if (editorTab !== 'trending') return;
     for (const song of youtubeVideos) {
       if (song.songId > 0 && !favoriteArtwork[song.songId]) {
         requestSongArtwork({ id: song.songId, title: song.title });
       }
     }
-  }, [youtubeVideos, editorTab, favoriteArtwork]);
+  }, [youtubeVideos, favoriteArtwork]);
 
   function selectSong(song: Song, closeSearch = true) {
     setActiveSong(song);
