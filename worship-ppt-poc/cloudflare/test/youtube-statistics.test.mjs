@@ -5,7 +5,7 @@ import { discoverChannelVideos, refreshYoutubeStatistics } from '../src/youtube-
 test('batches video IDs and preserves unavailable likes as null', async () => {
   const rows = Array.from({ length: 51 }, (_, index) => ({ video_id: `video${index}` }));
   const writes = [];
-  const db = { prepare(sql) { return {
+  const db = { async batch(statements) { for (const statement of statements) await statement.run(); }, prepare(sql) { return {
     async all() { return { results: sql.includes('youtube_channels') ? [] : rows }; },
     async run() {},
     bind(...values) { return { async run() { writes.push(values); } }; },
@@ -31,7 +31,7 @@ test('fails clearly when no API key is configured', async () => {
 
 test('keeps the complete title of a medley without assigning a song', async () => {
   const writes = [];
-  const db = { prepare() { return {
+  const db = { async batch(statements) { for (const statement of statements) await statement.run(); }, prepare() { return {
     async all() { return { results: [{ channel_id: 'channel1' }] }; },
     bind(...values) { return { async run() { writes.push(values); } }; },
   }; } };

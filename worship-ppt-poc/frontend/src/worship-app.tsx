@@ -93,6 +93,8 @@ export function WorshipApp() {
   const [imageInputKey, setImageInputKey] = useState(0);
   const [libraryError, setLibraryError] = useState('');
   const [editorTab, setEditorTab] = useState<'songs' | 'favorites' | 'trending'>('songs');
+  const [youtubeVideos, setYoutubeVideos] = useState<{ videoId: string; title: string; views: number | null; likes: number | null; fetchedAt: string }[]>([]);
+  const [youtubeStatus, setYoutubeStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [recentSongs, setRecentSongs] = useState<RecentSong[]>(() => {
     try {
       const stored = window.localStorage.getItem('yebit.recent-songs');
@@ -137,7 +139,13 @@ export function WorshipApp() {
 
   const validStyle = Boolean(pptStyle.fontFamily.trim()) && pptStyle.fontFamily.length <= 80 && Number.isInteger(pptStyle.fontSize) && pptStyle.fontSize >= 16 && pptStyle.fontSize <= 100 && Number.isInteger(pptStyle.linesPerSlide) && pptStyle.linesPerSlide >= 1 && pptStyle.linesPerSlide <= 6;
   const favoriteSongs = readySongs.filter((song) => favoriteIds.includes(song.id));
-  const trendingSongs = allSongs.filter((song) => songSelectionCounts[song.id] > 0).sort((first, second) => (songSelectionCounts[second.id] ?? 0) - (songSelectionCounts[first.id] ?? 0) || first.title.localeCompare(second.title, 'ko')).slice(0, 10);
+  useEffect(() => {
+    if (editorTab !== 'trending') return;
+    let cancelled = false;
+    setYoutubeStatus('loading');
+    api<typeof youtubeVideos>('/youtube-videos').then(({ data }) => { if (!cancelled) { setYoutubeVideos(data); setYoutubeStatus('ready'); } }).catch(() => { if (!cancelled) setYoutubeStatus('error'); });
+    return () => { cancelled = true; };
+  }, [editorTab]);
 
   useEffect(() => {
     try {
@@ -622,9 +630,9 @@ export function WorshipApp() {
                 {loadingSongs ? <div className="editor-library-empty"><strong>곡 목록을 확인하고 있습니다</strong></div> : !libraryError && (favoriteSongs.length === 0 ? <div className="editor-library-empty"><strong>즐겨찾는 곡이 없습니다</strong><span>곡 검색 결과에서 별표를 눌러 추가하세요.</span></div> : <div className="editor-favorite-list">{favoriteSongs.map((song) => { const artwork = favoriteArtwork[song.id]; return <div className="recent-song-card favorite-artwork-row" key={song.id}>{artwork?.imageUrl && <img className="recent-song-card__image" src={artwork.imageUrl} alt="" />}<span className="recent-song-card__glass favorite-artwork-glass"><button className="recent-song-card__title" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong></button><span className="recent-song-card__meta"><small>{song.category?.toUpperCase() === 'HYMN' && song.hymnNumber ? `새찬송가 ${song.hymnNumber}장` : displayKnown(song.artist) || '즐겨찾기 곡'}</small>{artwork?.sourceUrl && <a href={artwork.sourceUrl} target="_blank" rel="noreferrer">Pixabay · {artwork.contributor || '이미지 출처'}</a>}</span></span><button className="favorite-toggle is-favorite favorite-artwork-toggle" type="button" onClick={() => toggleFavorite(song)} aria-label={`${song.title} 즐겨찾기 해제`}>★</button></div>; })}</div>)}
               </div> : null}
               <div className={`editor-control-group trend-panel${editorTab === 'trending' ? ' is-visible' : ' is-preloaded'}`} aria-hidden={editorTab !== 'trending'}>
-                <div className="editor-heading"><h2>이 기기에서 자주 선택한 곡</h2><span>{trendingSongs.length}곡</span></div>
-                <p className="trend-source-note">이 브라우저에서 곡을 선택한 횟수로 표시합니다. 다른 기기의 기록은 포함되지 않습니다.</p>
-                {trendingSongs.length ? <ol className="local-trend-list">{trendingSongs.map((song, index) => <li key={song.id}><span className="local-trend-rank">{String(index + 1).padStart(2, '0')}</span><button type="button" className="local-trend-song" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>{displayKnown(song.artist) || (song.category?.toUpperCase() === 'HYMN' && song.hymnNumber ? `새찬송가 ${song.hymnNumber}장` : '곡')}</small></button><span className="local-trend-count">{songSelectionCounts[song.id]}회</span></li>)}</ol> : <div className="editor-library-empty"><strong>아직 선택 기록이 없습니다</strong><span>곡을 선택하면 이 기기의 선택 횟수 순으로 표시됩니다.</span></div>}
+                <div className="editor-heading"><h2>찬양 채널 영상</h2><span>{youtubeVideos.length}개</span></div>
+                <p className="trend-source-note">YouTube 공개 영상 통계 · 매주 갱신 · 영상 전체 기준이며 인기순은 아닙니다.</p>
+                {youtubeStatus === 'loading' ? <p className="trend-source-note">영상 정보를 불러오는 중입니다.</p> : youtubeStatus === 'error' ? <p className="trend-source-note">영상 정보를 불러오지 못했습니다.</p> : youtubeVideos.length ? <ul className="local-trend-list">{youtubeVideos.map((video) => <li key={video.videoId}><a className="local-trend-song" href={`https://www.youtube.com/watch?v=${encodeURIComponent(video.videoId)}`} target="_blank" rel="noreferrer"><strong>{video.title}</strong><small>YouTube · 조회 {video.views == null ? '정보 없음' : video.views.toLocaleString('ko-KR')} · 좋아요 {video.likes == null ? '정보 없음' : video.likes.toLocaleString('ko-KR')}</small></a></li>)}</ul> : <div className="editor-library-empty"><strong>아직 수집된 영상이 없습니다</strong><span>첫 번째 주간 수집 이후 표시됩니다.</span></div>}
               </div>
             </div>
           </aside>

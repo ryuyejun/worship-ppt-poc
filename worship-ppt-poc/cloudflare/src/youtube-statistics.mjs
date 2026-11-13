@@ -19,14 +19,16 @@ export async function discoverChannelVideos(db, apiKey, fetcher = fetch) {
       const playlistId = channel.contentDetails?.relatedPlaylists?.uploads;
       if (!playlistId) continue;
       const videos = await youtubeGet('playlistItems', { part: 'snippet', playlistId, maxResults: '10' }, apiKey, fetcher);
+      const statements = [];
       for (const video of videos) {
         const videoId = video.snippet?.resourceId?.videoId;
         const title = video.snippet?.title;
         if (!/^[A-Za-z0-9_-]{11}$/.test(videoId || '') || typeof title !== 'string') continue;
-        await db.prepare(`INSERT INTO youtube_videos (video_id, channel_id, video_title) VALUES (?, ?, ?)
+        statements.push(db.prepare(`INSERT INTO youtube_videos (video_id, channel_id, video_title) VALUES (?, ?, ?)
           ON CONFLICT(video_id) DO UPDATE SET channel_id = excluded.channel_id, video_title = excluded.video_title`)
-          .bind(videoId, channel.id, title).run();
+          .bind(videoId, channel.id, title));
       }
+      if (statements.length) await db.batch(statements);
     }
   }
 }
@@ -43,18 +45,20 @@ export async function refreshYoutubeStatistics(db, apiKey, fetcher = fetch) {
     const ids = results.slice(offset, offset + 50).map(row => row.video_id);
     const items = await youtubeGet('videos', { part: 'snippet,statistics', id: ids.join(',') }, apiKey, fetcher);
     const now = new Date().toISOString();
+    const statements = [];
     for (const item of items) {
       if (!ids.includes(item.id)) continue;
       if (typeof item.snippet?.title === 'string') {
-        await db.prepare('UPDATE youtube_videos SET video_title = ? WHERE video_id = ?').bind(item.snippet.title, item.id).run();
+        statements.push(db.prepare('UPDATE youtube_videos SET video_title = ? WHERE video_id = ?').bind(item.snippet.title, item.id));
       }
       const count = value => /^\d+$/.test(String(value ?? '')) && Number.isSafeInteger(Number(value)) ? Number(value) : null;
-      await db.prepare(`INSERT INTO youtube_video_statistics (video_id, view_count, like_count, fetched_at)
+      statements.push(db.prepare(`INSERT INTO youtube_video_statistics (video_id, view_count, like_count, fetched_at)
         VALUES (?, ?, ?, ?) ON CONFLICT(video_id) DO UPDATE SET
         view_count = excluded.view_count, like_count = excluded.like_count, fetched_at = excluded.fetched_at`)
-        .bind(item.id, count(item.statistics?.viewCount), count(item.statistics?.likeCount), now).run();
+        .bind(item.id, count(item.statistics?.viewCount), count(item.statistics?.likeCount), now));
       updated++;
     }
+    if (statements.length) await db.batch(statements);
   }
   return { requested: results.length, updated };
 }

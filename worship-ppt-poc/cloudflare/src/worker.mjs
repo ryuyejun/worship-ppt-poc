@@ -5,7 +5,7 @@ import { refreshYoutubeStatistics } from './youtube-statistics.mjs';
 const json = (body, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
 const fail = (message, status) => json({ success: false, data: null, error: message }, status);
 const ok = data => json({ success: true, data, error: null });
-const routes = new Set(['/songs', '/ppt-songs', '/search', '/song', '/requests', '/providers/search', '/song-artwork/search']);
+const routes = new Set(['/songs', '/ppt-songs', '/search', '/song', '/requests', '/providers/search', '/song-artwork/search', '/youtube-videos']);
 
 async function readInput(request) {
   if (Number(request.headers.get('content-length') || 0) > 4096) return null;
@@ -56,6 +56,13 @@ export default {
       let input;
       try { input = text ? JSON.parse(text) : {}; } catch { return fail('요청 형식을 확인해 주세요.', 400); }
       if (path === '/songs') return ok(await listSongs(env.DB, false));
+      if (path === '/youtube-videos') {
+        const { results } = await env.DB.prepare(`SELECT v.video_id AS videoId, v.video_title AS title, s.view_count AS views, s.like_count AS likes, s.fetched_at AS fetchedAt
+          FROM youtube_videos v JOIN youtube_video_statistics s ON s.video_id = v.video_id
+          WHERE v.enabled = 1 AND v.video_title IS NOT NULL AND datetime(s.fetched_at) >= datetime('now', '-30 days')
+          ORDER BY v.rowid DESC LIMIT 100`).all();
+        return ok(results);
+      }
       if (path === '/ppt-songs') return ok(await listSongs(env.DB, true));
       if (path === '/search') {
         const songs = await searchSongs(env.DB, input?.title);
