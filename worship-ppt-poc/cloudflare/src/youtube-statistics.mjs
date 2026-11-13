@@ -6,19 +6,24 @@ async function youtubeGet(path, params, apiKey, fetcher) {
   if (!response.ok) throw new Error(`YouTube request failed (${response.status})`);
   const payload = await response.json();
   if (!Array.isArray(payload.items)) throw new Error('Invalid YouTube response');
-  return payload.items;
+  return { items: payload.items, nextPageToken: payload.nextPageToken };
 }
 
 export async function discoverChannelVideos(db, apiKey, fetcher = fetch) {
   const { results: channels } = await db.prepare('SELECT channel_id FROM youtube_channels WHERE enabled = 1 ORDER BY channel_id').all();
   for (let offset = 0; offset < channels.length; offset += 50) {
     const ids = channels.slice(offset, offset + 50).map(row => row.channel_id);
-    const items = await youtubeGet('channels', { part: 'contentDetails', id: ids.join(',') }, apiKey, fetcher);
+    const { items } = await youtubeGet('channels', { part: 'contentDetails', id: ids.join(',') }, apiKey, fetcher);
     for (const channel of items) {
       if (!ids.includes(channel.id)) continue;
       const playlistId = channel.contentDetails?.relatedPlaylists?.uploads;
       if (!playlistId) continue;
-      const videos = await youtubeGet('playlistItems', { part: 'snippet', playlistId, maxResults: '50' }, apiKey, fetcher);
+      const firstPage = await youtubeGet('playlistItems', { part: 'snippet', playlistId, maxResults: '50' }, apiKey, fetcher);
+      const videos = [...firstPage.items];
+      if (firstPage.nextPageToken) {
+        const secondPage = await youtubeGet('playlistItems', { part: 'snippet', playlistId, maxResults: '50', pageToken: firstPage.nextPageToken }, apiKey, fetcher);
+        videos.push(...secondPage.items);
+      }
       const statements = [];
       for (const video of videos) {
         const videoId = video.snippet?.resourceId?.videoId;
@@ -43,7 +48,7 @@ export async function refreshYoutubeStatistics(db, apiKey, fetcher = fetch) {
   let updated = 0;
   for (let offset = 0; offset < results.length; offset += 50) {
     const ids = results.slice(offset, offset + 50).map(row => row.video_id);
-    const items = await youtubeGet('videos', { part: 'snippet,statistics', id: ids.join(',') }, apiKey, fetcher);
+    const { items } = await youtubeGet('videos', { part: 'snippet,statistics', id: ids.join(',') }, apiKey, fetcher);
     const now = new Date().toISOString();
     const statements = [];
     for (const item of items) {
