@@ -280,9 +280,11 @@ footer.app-footer.closing { height: auto; min-height: 0; padding: 18px 40px 20px
 .trend-source-note { margin: 0; color: #68727b; font-size: 11px; line-height: 1.5; }
 .trend-panel.is-preloaded { position: fixed; top: 0; left: -10000px; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
 .local-trend-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.local-trend-list li { display: flex; min-width: 0; min-height: 60px; align-items: center; gap: 10px; border-bottom: 1px solid rgba(0,0,0,.06); }
+.local-trend-list li { display: flex; min-width: 0; min-height: 68px; align-items: center; gap: 10px; border-bottom: 1px solid rgba(0,0,0,.06); }
 .local-trend-rank { width: 24px; flex: 0 0 24px; color: #668096; font-size: 12px; font-weight: 600; text-align: center; }
-.local-trend-song { display: grid; min-width: 0; flex: 1; gap: 4px; border: 0; background: transparent; padding: 8px 0; color: #252b30; text-align: left; }
+.local-trend-song { display: flex; min-width: 0; flex: 1; align-items: center; gap: 10px; border: 0; background: transparent; padding: 8px 0; color: #252b30; text-align: left; }
+.local-trend-artwork { width: 48px; height: 48px; flex: 0 0 48px; border-radius: 7px; object-fit: cover; }
+.local-trend-song__text { display: grid; min-width: 0; flex: 1; gap: 4px; }
 .local-trend-song strong, .local-trend-song small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .local-trend-song strong { font-size: 13px; font-weight: 550; }
 .local-trend-song small { color: #737a7e; font-size: 10px; }

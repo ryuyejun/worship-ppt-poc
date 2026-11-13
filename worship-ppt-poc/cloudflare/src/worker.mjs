@@ -62,7 +62,7 @@ export default {
           FROM youtube_videos v JOIN youtube_video_statistics s ON s.video_id = v.video_id
           WHERE v.enabled = 1 AND v.video_title IS NOT NULL AND datetime(s.fetched_at) >= datetime('now', '-30 days')
           ORDER BY v.rowid DESC LIMIT 1000`).all();
-        const songs = await env.DB.prepare('SELECT title FROM songs WHERE title IS NOT NULL').all();
+        const songs = await env.DB.prepare('SELECT id, title FROM songs WHERE title IS NOT NULL').all();
         return ok(matchSongVideos(results, songs.results));
       }
       if (path === '/ppt-songs') return ok(await listSongs(env.DB, true));
