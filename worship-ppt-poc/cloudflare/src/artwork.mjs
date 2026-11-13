@@ -73,7 +73,7 @@ export async function findArtwork(db, songId, apiKey, externalTitle) {
     }
     if (image) break;
   }
-  if (!successfulSearch) return unavailable(songId);
+  if (!successfulSearch || (!image && searchResults.some(result => result.status))) return unavailable(songId);
   await db.prepare(`INSERT INTO ${table}(song_id,song_title,fetched_at,search_response,image_data,image_type,source_url,contributor)
     VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(song_id) DO UPDATE SET song_title=excluded.song_title, fetched_at=excluded.fetched_at,
     search_response=excluded.search_response, image_data=excluded.image_data, image_type=excluded.image_type,
