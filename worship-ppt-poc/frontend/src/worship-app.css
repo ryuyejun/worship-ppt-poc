@@ -285,9 +285,9 @@ footer.app-footer.closing { height: auto; min-height: 0; padding: 18px 40px 20px
 .local-trend-song { display: flex; min-width: 0; flex: 1; align-items: center; gap: 10px; border: 0; background: transparent; padding: 8px 0; color: #252b30; text-align: left; }
 .local-trend-artwork { width: 48px; height: 48px; flex: 0 0 48px; border-radius: 7px; object-fit: cover; }
 .local-trend-song__text { display: grid; min-width: 0; flex: 1; gap: 4px; }
-.local-trend-song strong, .local-trend-song small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.local-trend-song strong { font-size: 13px; font-weight: 550; }
-.local-trend-song small { color: #737a7e; font-size: 10px; }
+.local-trend-song strong, .local-trend-song small { overflow-wrap: anywhere; white-space: normal; }
+.local-trend-song strong { font-size: 13px; font-weight: 550; line-height: 1.35; }
+.local-trend-song small { color: #737a7e; font-size: 10px; line-height: 1.35; }
 .local-trend-count { flex: 0 0 auto; color: #668096; font-size: 10px; }
 .editor-selected-queue { margin-top: 16px; border-top: 1px solid rgba(0,0,0,.12); padding-top: 12px; }
 .editor-tabs { position: absolute; top: 150px; left: 13px; display: flex; width: 205px; height: 37px; align-items: center; gap: 12px; border: 0; padding: 5px; }
