@@ -1,5 +1,6 @@
 const MAX_IMAGE_BYTES = 900_000;
 const CACHE_MILLISECONDS = 24 * 60 * 60 * 1000;
+const SEARCH_VERSION = 2;
 const unavailable = songId => ({ available: false, songId, imageUrl: null, sourceUrl: null, contributor: null });
 const allowedUrl = value => {
   try { const url = new URL(value); return url.protocol === 'https:' && (url.hostname === 'pixabay.com' || url.hostname.endsWith('.pixabay.com')); }
@@ -35,13 +36,14 @@ export async function findArtwork(db, songId, apiKey, externalTitle) {
   const song = external ? (title ? { title } : null) : await db.prepare('SELECT title FROM songs WHERE id = ?').bind(songId).first();
   const table = external ? 'external_song_artwork_cache' : 'song_artwork_cache';
   if (!song) return unavailable(songId);
-  const cached = await db.prepare(`SELECT song_title, fetched_at, image_type, source_url, contributor FROM ${table} WHERE song_id = ?`).bind(songId).first();
-  if (cached?.song_title === song.title && cached.image_type) return responseFor(songId, cached);
-  if (cached?.song_title === song.title && Date.now() - Date.parse(cached.fetched_at) < CACHE_MILLISECONDS) return unavailable(songId);
+  const cached = await db.prepare(`SELECT song_title, fetched_at, search_response, image_type, source_url, contributor FROM ${table} WHERE song_id = ?`).bind(songId).first();
+  const currentSearch = cached?.song_title === song.title && cached.search_response?.includes(`"searchVersion":${SEARCH_VERSION}`);
+  if (currentSearch && cached.image_type) return responseFor(songId, cached);
+  if (currentSearch && Date.now() - Date.parse(cached.fetched_at) < CACHE_MILLISECONDS) return unavailable(songId);
   if (!apiKey) return unavailable(songId);
   const query = new URL('https://pixabay.com/api/');
   query.searchParams.set('key', apiKey); query.searchParams.set('q', song.title.slice(0, 100));
-  query.searchParams.set('lang', 'ko'); query.searchParams.set('image_type', 'photo');
+  query.searchParams.set('lang', 'ko'); query.searchParams.set('image_type', 'photo'); query.searchParams.set('category', 'religion');
   query.searchParams.set('orientation', 'horizontal'); query.searchParams.set('safesearch', 'true'); query.searchParams.set('per_page', '3');
   const result = await fetch(query, { signal: AbortSignal.timeout(8000) });
   if (!result.ok) throw new Error('Pixabay search failed');
@@ -61,7 +63,7 @@ export async function findArtwork(db, songId, apiKey, externalTitle) {
     VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(song_id) DO UPDATE SET song_title=excluded.song_title, fetched_at=excluded.fetched_at,
     search_response=excluded.search_response, image_data=excluded.image_data, image_type=excluded.image_type,
     source_url=excluded.source_url, contributor=excluded.contributor`)
-    .bind(songId, song.title, new Date().toISOString(), JSON.stringify(data), image ? image.buffer : null, type, source, contributor).run();
+    .bind(songId, song.title, new Date().toISOString(), JSON.stringify({ searchVersion: SEARCH_VERSION, result: data }), image ? image.buffer : null, type, source, contributor).run();
   return responseFor(songId, { image_type:type, source_url:source, contributor });
 }
 
