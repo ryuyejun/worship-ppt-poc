@@ -1,6 +1,7 @@
 import { listSongs, searchSongs, getSong, queueMissing } from './songs.mjs';
 import { findArtwork, getArtworkImage } from './artwork.mjs';
 import { refreshYoutubeStatistics } from './youtube-statistics.mjs';
+import { matchSongVideos } from './song-video-match.mjs';
 
 const json = (body, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
 const fail = (message, status) => json({ success: false, data: null, error: message }, status);
@@ -57,11 +58,12 @@ export default {
       try { input = text ? JSON.parse(text) : {}; } catch { return fail('요청 형식을 확인해 주세요.', 400); }
       if (path === '/songs') return ok(await listSongs(env.DB, false));
       if (path === '/youtube-videos') {
-        const { results } = await env.DB.prepare(`SELECT v.video_id AS videoId, v.video_title AS title, s.view_count AS views, s.like_count AS likes, s.fetched_at AS fetchedAt
+        const { results } = await env.DB.prepare(`SELECT v.video_id AS videoId, v.video_title AS videoTitle, s.view_count AS views, s.like_count AS likes, s.fetched_at AS fetchedAt
           FROM youtube_videos v JOIN youtube_video_statistics s ON s.video_id = v.video_id
           WHERE v.enabled = 1 AND v.video_title IS NOT NULL AND datetime(s.fetched_at) >= datetime('now', '-30 days')
-          ORDER BY v.rowid DESC LIMIT 100`).all();
-        return ok(results);
+          ORDER BY v.rowid DESC LIMIT 1000`).all();
+        const songs = await env.DB.prepare('SELECT title FROM songs WHERE title IS NOT NULL').all();
+        return ok(matchSongVideos(results, songs.results));
       }
       if (path === '/ppt-songs') return ok(await listSongs(env.DB, true));
       if (path === '/search') {
