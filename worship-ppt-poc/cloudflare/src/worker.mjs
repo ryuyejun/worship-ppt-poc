@@ -14,7 +14,15 @@ async function getTrendingSongs(db) {
     WHERE v.enabled = 1 AND v.video_title IS NOT NULL AND datetime(s.fetched_at) >= datetime('now', '-30 days')
     ORDER BY v.rowid DESC LIMIT 1000`).all();
   const { results: songs } = await db.prepare('SELECT id, title FROM songs WHERE title IS NOT NULL').all();
-  return matchSongVideos(videos, songs);
+  const matches = matchSongVideos(videos, songs);
+  const { results: artworkRows } = await db.prepare('SELECT song_id AS songId FROM song_artwork_cache WHERE image_data IS NOT NULL ORDER BY song_id').all();
+  if (!artworkRows.length) return matches.map(song => ({ ...song, artworkUrl: null }));
+  const artworkIds = artworkRows.map(row => row.songId);
+  const artworkIdSet = new Set(artworkIds);
+  return matches.map(song => {
+    const imageId = artworkIdSet.has(song.songId) ? song.songId : artworkIds[Math.abs(song.songId) % artworkIds.length];
+    return { ...song, artworkUrl: `/song-artwork/image/${imageId}` };
+  });
 }
 
 async function readInput(request) {
