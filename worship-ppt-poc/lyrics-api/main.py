@@ -111,8 +111,36 @@ def find_youtube_candidates(artist: str, title: str) -> list[dict[str, str]]:
                 "channel": snippet.get("channelTitle", ""),
                 "url": f"https://www.youtube.com/watch?v={video_id}",
                 "source": "YouTube",
+                "description": "",
             }
         )
+
+    if not candidates:
+        return candidates
+
+    video_parameters = urllib.parse.urlencode(
+        {
+            "part": "snippet",
+            "id": ",".join(candidate["video_id"] for candidate in candidates),
+            "key": api_key,
+        }
+    )
+    video_request = urllib.request.Request(
+        f"https://www.googleapis.com/youtube/v3/videos?{video_parameters}",
+        headers={"Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(video_request, timeout=6) as response:
+            video_payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        return candidates
+
+    descriptions = {
+        item.get("id"): item.get("snippet", {}).get("description", "")
+        for item in video_payload.get("items", [])
+    }
+    for candidate in candidates:
+        candidate["description"] = descriptions.get(candidate["video_id"], "")
     return candidates
 
 
