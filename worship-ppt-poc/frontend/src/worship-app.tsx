@@ -30,7 +30,8 @@ function uniqueRecentSongs(songs: RecentSong[]) {
 }
 
 function youtubeThumbnailUrl(videoId?: string | null) {
-  return videoId && /^[A-Za-z0-9_-]{11}$/.test(videoId) ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : undefined;
+  if (!videoId || !/^[A-Za-z0-9_-]{11}$/.test(videoId)) return undefined;
+  return cloudflareMode ? `/youtube-thumbnail/${videoId}` : `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
 }
 
 function youtubeVideoIdFromUrl(url?: string | null) {

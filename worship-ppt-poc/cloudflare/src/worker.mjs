@@ -211,6 +211,15 @@ export default {
       try { await env.DB.prepare('SELECT 1 AS ok').first(); return json({ status: 'ok', database: 'connected' }); }
       catch { return json({ status: 'unavailable', database: 'unavailable' }, 503); }
     }
+    const youtubeThumbnailMatch = path.match(/^\/youtube-thumbnail\/([A-Za-z0-9_-]{11})$/);
+    if (youtubeThumbnailMatch && request.method === 'GET') {
+      try {
+        const response = await fetch(`https://i.ytimg.com/vi/${youtubeThumbnailMatch[1]}/hqdefault.jpg`, { signal: AbortSignal.timeout(8000) });
+        const contentType = response.headers.get('content-type') || '';
+        if (!response.ok || !contentType.startsWith('image/')) return new Response(null, { status: 404 });
+        return new Response(response.body, { headers: { 'Content-Type': contentType, 'Cache-Control': 'public, max-age=86400', 'X-Content-Type-Options': 'nosniff' } });
+      } catch { return new Response(null, { status: 502 }); }
+    }
     const imageMatch = path.match(/^\/song-artwork\/image\/(-?\d+)$/);
     if (imageMatch && request.method === 'GET') {
       try {
