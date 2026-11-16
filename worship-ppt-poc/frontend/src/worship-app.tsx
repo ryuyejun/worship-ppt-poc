@@ -1048,31 +1048,27 @@ export function WorshipApp() {
 
   if (authStatus !== 'authenticated') {
     return <main className="auth-screen">
-      <section className={`auth-card${authMode === 'signup' ? ' is-signup' : ''}`} aria-label="Yebit 계정">
+      <section className={`auth-card${authMode === 'signup' ? ' is-signup' : ''}`} aria-label="Yebit 계정" aria-busy={authStatus === 'checking'}>
         <div className="auth-main" aria-labelledby="auth-title">
-          <div className="auth-brand"><img src="/assets/figma/editor-logo.png" width="46" height="46" alt="" /><span>Yebit</span></div>
           <div className="auth-form-content">
-            <p className="auth-eyebrow">찬양 PPT 제작</p>
-            <h1 id="auth-title">{authStatus === 'checking' ? '로그인 상태를 확인하고 있습니다' : authMode === 'login' ? '로그인' : '회원가입'}</h1>
-            {authStatus === 'checking' ? <p className="auth-help">잠시만 기다려 주세요.</p> : <>
-              <p className="auth-form-intro">{authMode === 'login' ? '계정에 로그인해 계속 이용하세요.' : '이메일로 Yebit 계정을 만들어 보세요.'}</p>
-              <form className="auth-form" onSubmit={submitAuth}>
-                <label>이메일<input type="email" autoComplete="email" required maxLength={254} value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="이메일 주소" /></label>
-                <label>비밀번호<input type="password" autoComplete={authMode === 'login' ? 'current-password' : 'new-password'} required minLength={10} maxLength={128} value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} placeholder={authMode === 'signup' ? '10자 이상 입력' : '비밀번호'} /></label>
-                {authError && <p className="auth-error" role="alert">{authError}</p>}
-                <button className="auth-submit" type="submit" disabled={authSubmitting}>{authSubmitting ? '처리 중…' : authMode === 'login' ? '로그인' : '회원가입'}</button>
-              </form>
-              {authMode === 'signup' && <p className="auth-help">비밀번호는 10자 이상으로 설정해 주세요.</p>}
-            </>}
+            <h1 id="auth-title">{authMode === 'login' ? 'Sign in' : 'Create Account'}</h1>
+            <div className="auth-social-marks" aria-hidden="true"><span>f</span><span>G+</span><span>in</span></div>
+            <p className="auth-form-intro">or use your account</p>
+            <form className="auth-form" onSubmit={submitAuth}>
+              <label><span className="visually-hidden">Email</span><input type="email" autoComplete="email" required maxLength={254} value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="Email" /></label>
+              <label><span className="visually-hidden">Password</span><input type="password" autoComplete={authMode === 'login' ? 'current-password' : 'new-password'} required minLength={10} maxLength={128} value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} placeholder="Password" /></label>
+              {authMode === 'login' && <button className="auth-forgot" type="button" onClick={() => setAuthError('Password recovery is not available yet.')}>Forgot your password?</button>}
+              {authError && <p className="auth-error" role="alert">{authError}</p>}
+              <button className="auth-submit" type="submit" disabled={authSubmitting || authStatus === 'checking'}>{authSubmitting ? 'PLEASE WAIT' : authMode === 'login' ? 'SIGN IN' : 'SIGN UP'}</button>
+            </form>
           </div>
         </div>
         <aside className="auth-promo">
           <div className="auth-promo-copy">
-            <p>Yebit</p>
-            <h2>{authMode === 'login' ? '환영합니다' : '다시 만나 반가워요'}</h2>
-            <span>{authMode === 'login' ? '계정을 만들고 예배 찬양을 위한 PPT를 준비해 보세요.' : '로그인하고 이어서 찬양 PPT를 준비하세요.'}</span>
+            <h2>{authMode === 'login' ? 'Hello, Friend!' : 'Welcome Back!'}</h2>
+            <span>{authMode === 'login' ? 'Enter your personal details and start journey with us' : 'To keep connected with us please login with your personal info'}</span>
           </div>
-          <button type="button" className="auth-mode-toggle" onClick={() => { setAuthMode((mode) => mode === 'login' ? 'signup' : 'login'); setAuthError(''); setAuthPassword(''); }} disabled={authStatus === 'checking'}>{authMode === 'login' ? '회원가입' : '로그인'}</button>
+          <button type="button" className="auth-mode-toggle" onClick={() => { setAuthMode((mode) => mode === 'login' ? 'signup' : 'login'); setAuthError(''); setAuthPassword(''); }} disabled={authStatus === 'checking'}>{authMode === 'login' ? 'SIGN UP' : 'SIGN IN'}</button>
         </aside>
       </section>
     </main>;
