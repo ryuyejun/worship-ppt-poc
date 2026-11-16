@@ -325,7 +325,7 @@ footer.app-footer.closing { height: auto; min-height: 0; padding: 18px 40px 20px
 .editor-controls .result-main { gap: 3px; }
 .editor-controls .result-main strong { font-size: 14px; }
 .editor-controls .result-main small, .editor-controls .result-meta { font-size: 12px; }
-.editor-controls .song-detail { margin-top: 4px; border-top: 1px solid rgba(0,0,0,.12); padding-top: 14px; }
+.editor-controls .song-detail { order: -1; margin-top: 4px; border-top: 1px solid rgba(0,0,0,.12); padding-top: 14px; }
 .editor-controls .detail-title h3 { font-size: 17px; }
 .editor-controls .song-meta { gap: 6px 10px; margin: 12px 0; }
 .editor-controls .song-meta div, .editor-controls .lyrics-preview > span { font-size: 11px; }
