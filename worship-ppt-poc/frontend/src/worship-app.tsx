@@ -390,6 +390,7 @@ export function WorshipApp() {
   }
 
   function changeEditorTab(tab: 'songs' | 'lyrics' | 'favorites' | 'trending') {
+    if (editorTab === 'lyrics' && tab !== 'lyrics') setActiveSong(null);
     if (editorTab === 'favorites' && tab !== 'favorites' && pendingFavoriteRemovals.length) {
       setFavoriteIds((ids) => ids.filter((id) => !pendingFavoriteRemovals.includes(id)));
       setPendingFavoriteRemovals([]);
@@ -905,7 +906,7 @@ export function WorshipApp() {
               <button type="button" aria-pressed={editorTab === 'songs'} onClick={() => changeEditorTab('songs')}>최근</button>
               <button type="button" aria-pressed={editorTab === 'favorites'} onClick={() => changeEditorTab('favorites')}>즐겨찾기</button>
               <button type="button" aria-pressed={editorTab === 'trending'} onClick={() => changeEditorTab('trending')}>트렌드</button>
-              {activeSong && <button type="button" aria-pressed={editorTab === 'lyrics'} onClick={() => changeEditorTab('lyrics')}>가사</button>}
+              {activeSong && <button className="editor-tab--lyrics" type="button" aria-pressed={editorTab === 'lyrics'} onClick={() => changeEditorTab('lyrics')}>가사</button>}
             </div>
             <div className="editor-controls">
               {editorTab === 'songs' || editorTab === 'lyrics' ? <div className="editor-control-group">

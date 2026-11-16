@@ -295,8 +295,10 @@ footer.app-footer.closing { height: auto; min-height: 0; padding: 18px 40px 20px
 .editor-tabs button[aria-pressed="true"] { color: #111; }
 .editor-tabs button::after { position: absolute; right: 0; bottom: 1px; left: 0; height: 1px; background: #111; content: ''; transform: scaleX(0); transform-origin: center; transition: transform 240ms cubic-bezier(.2,.75,.25,1); }
 .editor-tabs button[aria-pressed="true"]::after { transform: scaleX(1); }
+.editor-tabs .editor-tab--lyrics { animation: lyrics-tab-enter 320ms cubic-bezier(.2,.75,.25,1) both; }
+@keyframes lyrics-tab-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 .editor-tabs button span { display: grid; min-width: 18px; height: 18px; place-items: center; border-radius: 9px; background: rgba(235,245,250,.85); color: #1879b8; font-size: 10px; }
-@media (prefers-reduced-motion: reduce) { .editor-tabs button::after { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .editor-tabs button::after { transition: none; } .editor-tabs .editor-tab--lyrics { animation: none; } }
 .editor-controls { position: absolute; top: 197px; right: 10px; bottom: 15px; left: 10px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0; }
 .editor-control-group { display: grid; align-content: start; gap: 10px; }
 .recent-song-section { display: grid; align-content: start; gap: 10px; }
