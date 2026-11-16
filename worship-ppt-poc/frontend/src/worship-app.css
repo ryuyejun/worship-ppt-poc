@@ -434,8 +434,6 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
 .filmstrip-add:hover { border-color: #4ca9d8; background: #fff; color: #237eac; }
 .filmstrip-add:focus-visible { outline: 2px solid #2383bb; outline-offset: 2px; }
 .editor-inspector { border-left: 0; }
-.inspector-heading { display: flex; min-height: 70px; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid rgba(0,0,0,.12); padding: 12px 14px; cursor: grab; touch-action: none; user-select: none; }
-.inspector-heading h2 { margin: 0; color: #252b30; font-size: 16px; font-weight: 650; }
 .inspector-controls { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px; }
 .inspector-controls > .style-field { margin-bottom: 20px; }
 .inspector-controls .style-field { gap: 6px; font-size: 12px; }
@@ -482,8 +480,6 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
   .inspector-resize-handle.is-left, .inspector-resize-handle.is-collapsed.is-left { right: auto; left: 0; }
   .inspector-resize-handle::after, .inspector-resize-handle.is-left::after, .inspector-resize-handle.is-collapsed::after { top: 50%; right: 5px; left: auto; width: 2px; height: 32px; transform: translateY(-50%); }
   .inspector-resize-handle { cursor: ns-resize; }
-  .inspector-heading:active { cursor: grabbing; }
-  .inspector-dock-grip { color: #87919a; font-size: 16px; }
   .editor-sidebar { grid-column: 1; grid-row: 1 / 3; min-height: 100dvh; }
   main.editor-page > section.editor-workspace { grid-column: 2; grid-row: 1; min-height: 64dvh; }
   .editor-inspector { grid-column: 2; grid-row: 2; min-height: 420px; border-top: 1px solid rgba(0,0,0,.12); border-left: 0; }

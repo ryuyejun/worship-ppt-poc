@@ -98,7 +98,6 @@ export function WorshipApp() {
   });
   const inspectorResizeRef = useRef<{ pointerId: number; startX: number; startWidth: number; currentWidth: number; dock: 'left' | 'right'; axis: 'x' | 'y' } | null>(null);
   const lastInspectorWidthRef = useRef(inspectorWidth);
-  const inspectorDockDragRef = useRef<{ pointerId: number; startX: number; startY: number } | null>(null);
   const [readySongs, setReadySongs] = useState<Song[]>([]);
   const [allSongs, setAllSongs] = useState<Song[]>([]);
   const [query, setQuery] = useState('');
@@ -138,6 +137,9 @@ export function WorshipApp() {
     if (inspectorResizeRef.current?.pointerId !== event.pointerId) return;
     const drag = inspectorResizeRef.current;
     inspectorResizeRef.current = null;
+    if (drag.axis === 'x' && Math.abs(event.clientX - drag.startX) > 120) {
+      setInspectorDock(event.clientX < window.innerWidth / 2 ? 'left' : 'right');
+    }
     if (drag.currentWidth < 180) {
       setInspectorWidth(lastInspectorWidthRef.current);
       setInspectorCollapsed(true);
@@ -148,23 +150,6 @@ export function WorshipApp() {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   }
 
-  function startInspectorDockDrag(event: ReactPointerEvent<HTMLDivElement>) {
-    if (event.button !== 0 && event.pointerType === 'mouse') return;
-    inspectorDockDragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-
-  function stopInspectorDockDrag(event: ReactPointerEvent<HTMLDivElement>) {
-    const drag = inspectorDockDragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    inspectorDockDragRef.current = null;
-    if (window.innerWidth <= 860 && event.clientY - drag.startY > 100) {
-      setInspectorCollapsed(true);
-    } else if (Math.abs(event.clientX - drag.startX) > 80 && Math.abs(event.clientX - drag.startX) > Math.abs(event.clientY - drag.startY)) {
-      setInspectorDock(event.clientX < window.innerWidth / 2 ? 'left' : 'right');
-    }
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-  }
   const artworkAttempts = useRef(new Set<string>());
   const artworkQueue = useRef<(Pick<Song, 'id' | 'title'> & { artist?: string | null })[]>([]);
   const activeArtworkRequests = useRef(0);
@@ -1064,7 +1049,6 @@ export function WorshipApp() {
             </div>
           </section>
           {!inspectorCollapsed && <aside className="editor-inspector" aria-label="슬라이드 편집">
-            <div className="inspector-heading" title="잡고 좌우로 끌어 화면 가장자리에 배치" onPointerDown={startInspectorDockDrag} onPointerUp={stopInspectorDockDrag} onPointerCancel={stopInspectorDockDrag}><div><p className="editor-kicker">편집 도구</p><h2>슬라이드 디자인</h2></div><span className="editor-count">{preview ? `${preview.slideIndex + 1} / ${preview.slideCount}` : '—'}</span><span className="inspector-dock-grip" aria-hidden="true">⠿</span></div>
             <div className="inspector-controls">
               <label className="style-field"><span>템플릿</span><select value={template} onChange={(event) => { const value = event.target.value; setTemplate(value); if (templateStyles[value]) setPptStyle({ ...templateStyles[value] }); }}><option value="original">기본 남색</option><option value="sky">맑은 하늘</option><option value="white">깔끔한 흰색</option><option value="black">선명한 검정</option><option value="custom">직접 설정</option></select></label>
               <div className="inspector-group"><h3>색상</h3><div className="style-grid"><label className="style-field"><span>배경</span><input type="color" value={pptStyle.backgroundColor} onChange={(event) => updateStyle({ backgroundColor: event.target.value })} /></label><label className="style-field"><span>글자</span><input type="color" value={slideTextColors[previewIndex] ?? pptStyle.textColor} onChange={(event) => setSlideTextColors((colors) => ({ ...colors, [previewIndex]: event.target.value }))} /></label></div></div>
