@@ -563,7 +563,7 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
   .auth-screen { display:grid; height:100vh; height:100svh; height:100dvh; min-height:0; padding:16px; }
   .auth-card { display:grid; grid-template-rows:minmax(0,1.5fr) minmax(220px,1fr); height:calc(100vh - 32px); height:calc(100svh - 32px); height:calc(100dvh - 32px); min-height:0; overflow:hidden; border-radius:18px; }
   .auth-main,.auth-promo { position:relative; inset:auto; width:100%; transform:none !important; }
-  .auth-main { min-height:0; overflow-y:auto; padding:76px 26px 22px; }
+  .auth-main { display:block; min-height:0; overflow-y:auto; padding:88px 26px 22px; }
   .auth-brand { top:26px; left:26px; }
   .auth-form-content { margin:0 auto; }
   .auth-form-content h1,.auth-promo-copy h2 { font-size:36px; }
