@@ -15,6 +15,20 @@ type PptStyle = {
 type Preview = { imageBase64: string; slideIndex: number; slideCount: number };
 type PptPayload = { slideSize?: SlideSize; songIds: number[]; extraSlides?: number; removedSlideIndexes?: number[]; slidePositions?: Record<number, SlideTextPosition>; slideTextOverrides?: Record<number, string>; slideTextColors?: Record<number, string>; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; pptxBase64?: string; style: PptStyle & { backgroundImageBase64?: string; backgroundImageType?: string } };
 
+function recentTitleKey(title: string) {
+  return title.normalize('NFC').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+}
+
+function uniqueRecentSongs(songs: RecentSong[]) {
+  const seen = new Set<string>();
+  return songs.filter((song) => {
+    const key = recentTitleKey(song.title);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 const fontOptions = ['Apple SD Gothic Neo', '맑은 고딕 (Malgun Gothic)', 'Pretendard', 'Noto Sans KR', '나눔고딕 (NanumGothic)', 'Noto Serif KR'];
 
 const templateStyles: Record<string, PptStyle> = {
@@ -106,7 +120,7 @@ export function WorshipApp() {
     try {
       const stored = window.localStorage.getItem('yebit.recent-songs');
       const parsed: unknown = stored ? JSON.parse(stored) : [];
-      return Array.isArray(parsed) ? parsed.filter((song): song is RecentSong => song && Number.isInteger(song.id) && song.id !== 0 && typeof song.title === 'string' && typeof song.selectedAt === 'number').slice(0, 5) : [];
+      return Array.isArray(parsed) ? uniqueRecentSongs(parsed.filter((song): song is RecentSong => song && Number.isInteger(song.id) && song.id !== 0 && typeof song.title === 'string' && typeof song.selectedAt === 'number')).slice(0, 5) : [];
     } catch {
       return [];
     }
@@ -228,7 +242,11 @@ export function WorshipApp() {
     setEditorTab('songs');
     if (closeSearch) setSearchOpen(false);
     artworkAttempts.current.delete(`${song.id}:${song.title}`);
-    setRecentSongs((songs) => [{ ...songs.find((recent) => recent.id === song.id && recent.title === song.title), id: song.id, title: song.title, artist: song.artist, selectedAt: Date.now(), ...(song.id < 0 && song.lyrics ? { lyrics: song.lyrics, source: song.source } : {}) }, ...songs.filter((recent) => recent.id !== song.id || recent.title !== song.title)].slice(0, 5));
+    const titleKey = recentTitleKey(song.title);
+    setRecentSongs((songs) => uniqueRecentSongs([
+      { ...songs.find((recent) => recentTitleKey(recent.title) === titleKey), id: song.id, title: song.title, artist: song.artist, selectedAt: Date.now(), ...(song.id < 0 && song.lyrics ? { lyrics: song.lyrics, source: song.source } : {}) },
+      ...songs.filter((recent) => recentTitleKey(recent.title) !== titleKey),
+    ]).slice(0, 5));
   }
 
   async function openTrendingSong(songId: number) {
