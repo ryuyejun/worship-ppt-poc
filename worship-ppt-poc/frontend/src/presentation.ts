@@ -1,9 +1,10 @@
 import type { Song } from './types';
 
+export type SlideTextPosition = { x: number; y: number; width: number; height: number };
 export type SlideStyle = { backgroundColor: string; textColor: string; fontFamily: string; fontSize: number; alignment: 'LEFT' | 'CENTER' | 'RIGHT'; linesPerSlide: number; bold: boolean; textX?: number; textY?: number; textWidth?: number; textHeight?: number; backgroundImageBase64?: string; backgroundImageType?: string };
 export type SlideSize = { width: number; height: number };
-export type PresentationInput = { slideSize?: SlideSize; songIds: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; extraSlides?: number; removedSlideIndexes?: number[]; pptxBase64?: string; style: SlideStyle };
-export type Slide = { title: string; lines: string[] };
+export type PresentationInput = { slideSize?: SlideSize; songIds: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; extraSlides?: number; removedSlideIndexes?: number[]; slidePositions?: Record<number, SlideTextPosition>; pptxBase64?: string; style: SlideStyle };
+export type Slide = { title: string; lines: string[]; textPosition?: SlideTextPosition };
 const lyricCache = new Map<number, Song>();
 
 export function splitLyrics(lyrics: string, perSlide: number): string[][] {
@@ -42,17 +43,14 @@ export async function collectSlides(input: PresentationInput, signal?: AbortSign
   slides.push(...Array.from({ length: extraSlides }, () => ({ title: '', lines: [] })));
   const removed = new Set((input.removedSlideIndexes ?? []).filter(index => Number.isInteger(index) && index >= 0));
   const visibleSlides = slides.filter((_, index) => !removed.has(index));
-  return visibleSlides.length ? visibleSlides : [{ title: '', lines: [] }];
+  const result = visibleSlides.length ? visibleSlides : [{ title: '', lines: [] }];
+  return result.map((slide, index) => ({ ...slide, textPosition: input.slidePositions?.[index] }));
 }
 
 export async function makePresentation(slides: Slide[], style: SlideStyle, size = {width:1280,height:720}): Promise<Blob> {
   const { default: PptxGenJS } = await import('pptxgenjs');
   const ppt = new PptxGenJS(); ppt.defineLayout({ name:'CUSTOM', width:size.width/96, height:size.height/96 }); ppt.layout = 'CUSTOM';
   const alignment = { LEFT: 'left', CENTER: 'center', RIGHT: 'right' } as const;
-  const textWidth = size.width * (style.textWidth ?? 87.5) / 100;
-  const textHeight = size.height * (style.textHeight ?? 55.6) / 100;
-  const textX = size.width * (style.textX ?? 50) / 100 - textWidth / 2;
-  const textY = size.height * (style.textY ?? 50) / 100 - textHeight / 2;
   for (const item of slides) {
     const slide = ppt.addSlide();
     slide.background = { color: style.backgroundColor.replace('#', '') };
@@ -60,6 +58,11 @@ export async function makePresentation(slides: Slide[], style: SlideStyle, size 
       const type = style.backgroundImageType === 'PNG' ? 'png' : 'jpeg';
       slide.addImage({ data: `data:image/${type};base64,${style.backgroundImageBase64}`, x: 0, y: 0, w: size.width/96, h: size.height/96 });
     }
+    const position = item.textPosition ?? { x: style.textX ?? 50, y: style.textY ?? 50, width: style.textWidth ?? 87.5, height: style.textHeight ?? 55.6 };
+    const textWidth = size.width * position.width / 100;
+    const textHeight = size.height * position.height / 100;
+    const textX = size.width * position.x / 100 - textWidth / 2;
+    const textY = size.height * position.y / 100 - textHeight / 2;
     slide.addText(item.lines.join('\n'), { x: textX/96, y: textY/96, w: textWidth/96, h: textHeight/96,
       fontFace: style.fontFamily, fontSize: style.fontSize, color: style.textColor.replace('#', ''),
       bold: style.bold, align: alignment[style.alignment], valign: 'middle', margin: 0 });
@@ -69,7 +72,7 @@ export async function makePresentation(slides: Slide[], style: SlideStyle, size 
   return data;
 }
 
-export async function renderSlide(slide: Slide, style: SlideStyle, width = 1280, size = {width:1280,height:720}): Promise<string> {
+export async function renderSlide(_slide: Slide, style: SlideStyle, width = 1280, size = {width:1280,height:720}): Promise<string> {
   const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = Math.round(width * size.height / size.width);
   const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('미리보기를 만들 수 없습니다.');
   ctx.scale(canvas.width / size.width, canvas.height / size.height);
@@ -78,22 +81,5 @@ export async function renderSlide(slide: Slide, style: SlideStyle, width = 1280,
     const image = new Image(); image.src = `data:image/${style.backgroundImageType === 'PNG' ? 'png' : 'jpeg'};base64,${style.backgroundImageBase64}`;
     await image.decode(); ctx.drawImage(image, 0, 0, size.width, size.height);
   }
-  const fontPx = style.fontSize * 4 / 3; const height = fontPx * 1.2;
-  ctx.font = `${style.bold ? 'bold ' : ''}${fontPx}px "${style.fontFamily.replace(/["\\]/g, '')}", sans-serif`;
-  ctx.fillStyle = style.textColor; ctx.textBaseline = 'middle'; ctx.textAlign = { LEFT: 'left', CENTER: 'center', RIGHT: 'right' }[style.alignment] as CanvasTextAlign;
-  const textWidth = size.width * (style.textWidth ?? 87.5) / 100;
-  const textHeight = size.height * (style.textHeight ?? 55.6) / 100;
-  const textLeft = size.width * (style.textX ?? 50) / 100 - textWidth / 2;
-  const textTop = size.height * (style.textY ?? 50) / 100 - textHeight / 2;
-  const wrapped: string[] = [];
-  for (const line of slide.lines) {
-    let part = '';
-    for (const char of line) { if (part && ctx.measureText(part + char).width > textWidth) { wrapped.push(part); part = char; } else part += char; }
-    wrapped.push(part);
-  }
-  const x = style.alignment === 'LEFT' ? textLeft : style.alignment === 'RIGHT' ? textLeft + textWidth : textLeft + textWidth / 2;
-  const y = textTop + textHeight / 2 - (wrapped.length - 1) * height / 2;
-  ctx.save(); ctx.beginPath(); ctx.rect(textLeft, textTop, textWidth, textHeight); ctx.clip();
-  wrapped.forEach((line, index) => ctx.fillText(line, x, y + index * height)); ctx.restore();
   return canvas.toDataURL('image/png').split(',')[1];
 }

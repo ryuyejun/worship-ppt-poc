@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { api, cloudflareMode } from './api';
 import type { Song, SongRequest } from './types';
-import { collectSlides, renderSlide, type Slide, type SlideStyle, type SlideSize } from './presentation';
+import { collectSlides, renderSlide, type Slide, type SlideSize, type SlideStyle, type SlideTextPosition } from './presentation';
 
 type Notice = { text: string; kind?: 'error' | 'success' } | null;
 type RecentSong = { id: number; title: string; artist: string | null; selectedAt: number; artworkUrl?: string; artworkSourceUrl?: string; artworkContributor?: string };
@@ -13,7 +13,7 @@ type PptStyle = {
   textX: number; textY: number; textWidth: number; textHeight: number;
 };
 type Preview = { imageBase64: string; slideIndex: number; slideCount: number };
-type PptPayload = { slideSize?: SlideSize; songIds: number[]; extraSlides?: number; removedSlideIndexes?: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; pptxBase64?: string; style: PptStyle & { backgroundImageBase64?: string; backgroundImageType?: string } };
+type PptPayload = { slideSize?: SlideSize; songIds: number[]; extraSlides?: number; removedSlideIndexes?: number[]; slidePositions?: Record<number, SlideTextPosition>; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; pptxBase64?: string; style: PptStyle & { backgroundImageBase64?: string; backgroundImageType?: string } };
 
 const fontOptions = ['Apple SD Gothic Neo', '맑은 고딕 (Malgun Gothic)', 'Pretendard', 'Noto Sans KR', '나눔고딕 (NanumGothic)', 'Noto Serif KR'];
 
@@ -138,9 +138,11 @@ export function WorshipApp() {
   const [previewIndex, setPreviewIndex] = useState(0);
   const [extraSlideCount, setExtraSlideCount] = useState(0);
   const [removedSlideIndexes, setRemovedSlideIndexes] = useState<number[]>([]);
+  const [slidePositions, setSlidePositions] = useState<Record<number, SlideTextPosition>>({});
+  const [selectedTextSlide, setSelectedTextSlide] = useState<number | null>(null);
   const [prepared, setPrepared] = useState<{ slides: Slide[]; style: SlideStyle; thumbnails: string[]; slideSize: SlideSize } | null>(null);
   const previewCache = useRef(new Map<number, string>());
-  const textBoxInteraction = useRef<{ mode: 'move' | 'resize'; startX: number; startY: number; x: number; y: number; width: number; height: number; element: HTMLDivElement; bounds: DOMRect } | null>(null);
+  const textBoxInteraction = useRef<{ mode: 'move' | 'resize'; slide: number; startX: number; startY: number; x: number; y: number; width: number; height: number; element: HTMLDivElement; bounds: DOMRect } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState('');
   const [previewRetry, setPreviewRetry] = useState(0);
@@ -298,6 +300,7 @@ export function WorshipApp() {
       songIds: selected.map((song) => song.id),
       extraSlides: extraSlideCount,
       removedSlideIndexes,
+      slidePositions,
       externalSongs: selected.filter((song) => song.id < 0).map((song) => ({ id: song.id, title: song.title, artist: song.artist, lyrics: song.lyrics ?? '' })),
       ...(existingPptData ? { pptxBase64: existingPptData } : {}),
       style: { ...pptStyle, ...(backgroundImage ? { backgroundImageBase64: backgroundImage.dataUrl.split(',')[1], backgroundImageType: backgroundImage.type } : {}) },
@@ -345,7 +348,7 @@ export function WorshipApp() {
       }
     }, 0);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [selected, pptStyle, backgroundImage, slideSize, existingPpt, existingPptData, existingPptError, validStyle, previewRetry, extraSlideCount, removedSlideIndexes]);
+  }, [selected, pptStyle, backgroundImage, slideSize, existingPpt, existingPptData, existingPptError, validStyle, previewRetry, extraSlideCount, removedSlideIndexes, slidePositions]);
 
   useEffect(() => {
     if (!prepared) return;
@@ -540,7 +543,7 @@ export function WorshipApp() {
     setTemplate('custom');
   }
 
-  function startTextBoxInteraction(event: ReactPointerEvent<HTMLElement>, mode: 'move' | 'resize' = 'move') {
+  function startTextBoxInteraction(event: ReactPointerEvent<HTMLElement>, slide: number, mode: 'move' | 'resize' = 'move') {
     const element = (mode === 'resize' ? event.currentTarget.parentElement : event.currentTarget) as HTMLDivElement | null;
     if (!element) return;
     const bounds = element.parentElement?.getBoundingClientRect();
@@ -548,7 +551,8 @@ export function WorshipApp() {
     event.preventDefault();
     event.stopPropagation();
     element.setPointerCapture(event.pointerId);
-    textBoxInteraction.current = { mode, startX: event.clientX, startY: event.clientY, x: pptStyle.textX, y: pptStyle.textY, width: pptStyle.textWidth, height: pptStyle.textHeight, element, bounds };
+    const position = slidePositions[slide] ?? { x: pptStyle.textX, y: pptStyle.textY, width: pptStyle.textWidth, height: pptStyle.textHeight };
+    textBoxInteraction.current = { mode, slide, startX: event.clientX, startY: event.clientY, ...position, element, bounds };
   }
 
   function moveTextBoxInteraction(event: ReactPointerEvent<HTMLElement>) {
@@ -571,7 +575,8 @@ export function WorshipApp() {
   function endTextBoxInteraction() {
     const interaction = textBoxInteraction.current;
     if (!interaction) return;
-    updateStyle({ textX: Number(interaction.element.dataset.nextX ?? interaction.x), textY: Number(interaction.element.dataset.nextY ?? interaction.y), textWidth: Number(interaction.element.dataset.nextWidth ?? interaction.width), textHeight: Number(interaction.element.dataset.nextHeight ?? interaction.height) });
+    const position = { x: Number(interaction.element.dataset.nextX ?? interaction.x), y: Number(interaction.element.dataset.nextY ?? interaction.y), width: Number(interaction.element.dataset.nextWidth ?? interaction.width), height: Number(interaction.element.dataset.nextHeight ?? interaction.height) };
+    setSlidePositions((positions) => ({ ...positions, [interaction.slide]: position }));
     textBoxInteraction.current = null;
   }
 
@@ -731,8 +736,8 @@ export function WorshipApp() {
           <section className="editor-workspace" aria-labelledby="preview-title">
             <div className="editor-toolbar"><label className="editor-document-title"><span className="visually-hidden">프레젠테이션 제목</span><input value={presentationTitle} onChange={(event) => setPresentationTitle(event.target.value)} maxLength={80} /><img src="/assets/figma/pencil.svg" alt="" /></label><div className="editor-size-control"><button className="editor-page-count" type="button" aria-label={`슬라이드 크기 ${slideSize.width} 곱하기 ${slideSize.height} 픽셀`} aria-expanded={sizeOpen} onClick={() => setSizeOpen((open) => !open)}><span>{slideSize.width}×{slideSize.height} px</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4.5 7.5 5.5 5 5.5-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button>{sizeOpen && <div className="editor-size-menu"><div className="editor-size-presets">{[{label:'16:9',width:1280,height:720},{label:'16:10',width:1280,height:800},{label:'4:3',width:1280,height:960},{label:'1:1',width:960,height:960}].map((preset) => <button type="button" key={preset.label} aria-pressed={slideSize.width===preset.width&&slideSize.height===preset.height} onClick={() => setSlideSize({width:preset.width,height:preset.height})}>{preset.label}</button>)}</div><div className="editor-size-custom"><label>가로<input type="number" min="320" max="3840" value={slideSize.width} onChange={(event) => setSlideSize((size) => ({...size,width:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label><span>×</span><label>세로<input type="number" min="320" max="3840" value={slideSize.height} onChange={(event) => setSlideSize((size) => ({...size,height:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label></div></div>}</div></div>
             <div className="editor-stage">
-              {previewError ? <div className="editor-canvas-message"><strong>미리보기를 열 수 없습니다</strong><span>{previewError}</span><button type="button" className="preview-retry" onClick={() => setPreviewRetry((value) => value + 1)}>다시 시도</button></div> : previewLoading && !prepared ? <div className="editor-canvas-message"><span className="preview-spinner" aria-hidden="true" /><strong>슬라이드를 불러오는 중</strong></div> : <div className="editor-page-stack" onScroll={(event) => { const cards = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[data-slide-index]')); const middle = event.currentTarget.getBoundingClientRect().top + event.currentTarget.clientHeight / 2; const nearest = cards.reduce((best, card) => Math.abs(card.getBoundingClientRect().top + card.offsetHeight / 2 - middle) < Math.abs(best.getBoundingClientRect().top + best.offsetHeight / 2 - middle) ? card : best, cards[0]); if (nearest) setPreviewIndex(Number(nearest.dataset.slideIndex)); }}>
-                {(prepared?.thumbnails ?? []).map((thumbnail, slide) => <div className={`editor-page-sheet ${previewIndex === slide ? 'is-current' : ''}`} data-slide-index={slide} key={slide} style={{aspectRatio:`${slideSize.width} / ${slideSize.height}`}}><img src={`data:image/png;base64,${thumbnail}`} alt={`${slide + 1}번째 슬라이드 미리보기`} />{previewIndex === slide && <div className="text-box-selection" style={{left:`${pptStyle.textX-pptStyle.textWidth/2}%`,top:`${pptStyle.textY-pptStyle.textHeight/2}%`,width:`${pptStyle.textWidth}%`,height:`${pptStyle.textHeight}%`}} onPointerDown={(event) => startTextBoxInteraction(event)} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction} role="group" aria-label="가사 상자 위치와 크기 조절"><i className="text-box-handle text-box-handle--tl"/><i className="text-box-handle text-box-handle--tr"/><i className="text-box-handle text-box-handle--bl"/><button className="text-box-handle text-box-handle--br" type="button" aria-label="가사 상자 크기 조절" onPointerDown={(event) => startTextBoxInteraction(event, 'resize')} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction}/></div>}<span className="editor-page-label">{slide + 1} 페이지</span><button className="editor-page-delete" type="button" aria-label={`${slide + 1}페이지 삭제`} onClick={() => { let original = 0; let visible = 0; while (visible < slide) { if (!removedSlideIndexes.includes(original)) visible += 1; original += 1; } while (removedSlideIndexes.includes(original)) original += 1; setRemovedSlideIndexes((indexes) => [...indexes, original]); setPreviewIndex(Math.max(0, slide - 1)); }}>×</button></div>)}
+              {previewError ? <div className="editor-canvas-message"><strong>미리보기를 열 수 없습니다</strong><span>{previewError}</span><button type="button" className="preview-retry" onClick={() => setPreviewRetry((value) => value + 1)}>다시 시도</button></div> : previewLoading && !prepared ? <div className="editor-canvas-message"><span className="preview-spinner" aria-hidden="true"/><strong>슬라이드를 불러오는 중</strong></div> : <div className="editor-page-stack" onScroll={(event) => { const cards = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[data-slide-index]')); const middle = event.currentTarget.getBoundingClientRect().top + event.currentTarget.clientHeight / 2; const nearest = cards.reduce((best, card) => Math.abs(card.getBoundingClientRect().top + card.offsetHeight / 2 - middle) < Math.abs(best.getBoundingClientRect().top + best.offsetHeight / 2 - middle) ? card : best, cards[0]); if (nearest) { setPreviewIndex(Number(nearest.dataset.slideIndex)); setSelectedTextSlide(null); } }}>
+                {(prepared?.thumbnails ?? []).map((thumbnail, slide) => { const position = slidePositions[slide] ?? { x: pptStyle.textX, y: pptStyle.textY, width: pptStyle.textWidth, height: pptStyle.textHeight }; const selectedText = selectedTextSlide === slide; return <div className={`editor-page-sheet ${previewIndex === slide ? 'is-current' : ''}`} data-slide-index={slide} key={slide} style={{aspectRatio:`${slideSize.width} / ${slideSize.height}`}}><img src={`data:image/png;base64,${thumbnail}`} alt="슬라이드 배경"/><div className="editor-slide-text" style={{left:`${position.x-position.width/2}%`,top:`${position.y-position.height/2}%`,width:`${position.width}%`,height:`${position.height}%`,fontFamily:pptStyle.fontFamily,fontSize:`${pptStyle.fontSize/960*100}cqw`,fontWeight:pptStyle.bold?700:400,color:pptStyle.textColor,textAlign:pptStyle.alignment.toLowerCase() as CanvasTextAlign,lineHeight:1.2}} onClick={() => { setPreviewIndex(slide); setSelectedTextSlide(slide); }} onPointerDown={(event) => { if (selectedText) startTextBoxInteraction(event, slide); }} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction} role="button" tabIndex={0} aria-label={`${slide+1}페이지 가사 텍스트 선택`}>{prepared?.slides[slide]?.lines.join('\n')}</div>{selectedText && <div className="text-box-selection" style={{left:`${position.x-position.width/2}%`,top:`${position.y-position.height/2}%`,width:`${position.width}%`,height:`${position.height}%`}} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction} role="group" aria-label="가사 상자 위치와 크기 조절"><i className="text-box-handle text-box-handle--tl"/><i className="text-box-handle text-box-handle--tr"/><i className="text-box-handle text-box-handle--bl"/><button className="text-box-handle text-box-handle--br" type="button" aria-label="가사 상자 크기 조절" onPointerDown={(event) => startTextBoxInteraction(event, slide, 'resize')} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction}/></div>}<span className="editor-page-label">{slide + 1} 페이지</span><button className="editor-page-delete" type="button" aria-label={`${slide + 1}페이지 삭제`} onClick={() => { let original = 0; let visible = 0; while (visible < slide) { if (!removedSlideIndexes.includes(original)) visible += 1; original += 1; } while (removedSlideIndexes.includes(original)) original += 1; setRemovedSlideIndexes((indexes) => [...indexes, original]); setPreviewIndex(Math.max(0, slide - 1)); setSelectedTextSlide(null); }}>×</button></div>; })}
               </div>}
             </div>
             <div className="editor-filmstrip" aria-label="슬라이드 페이지">
