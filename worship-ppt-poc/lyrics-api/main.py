@@ -102,6 +102,58 @@ def lrclib_lyrics(record: dict) -> str:
     return text.strip()
 
 
+def extract_lyrics(description: str) -> str:
+    """Return the longest lyric-like block; never infer or generate missing lines."""
+    metadata_pattern = re.compile(
+        r"https?://|www\.|#\w+|구독|subscribe|instagram|facebook|twitter|문의|비즈니스|"
+        r"저작권|copyright|작사|작곡|편곡|제공|출처|후원|donat|contact|credit|앨범 소개|수록곡|lyrics by|music by|"
+        r"guitar|bass|drum|cello|videographer|photograph|color.?graded|video.?edit|engineer|lighting|"
+        r"vocal|mixed|mastered|arrange|location|special thanks|recorded|camera|director|producer|production|"
+        r"피아워십|워십팀|세션|촬영|편집|녹화|음향|조명|마스터링|믹싱|연주|출연",
+        re.IGNORECASE,
+    )
+    blocks: list[list[str]] = []
+    current: list[str] = []
+    for raw_line in description.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = re.sub(r"^\[\d{2}:\d{2}(?:\.\d+)?\]\s*", "", raw_line).strip()
+        if not line:
+            if current and current[-1] != "":
+                current.append("")
+            continue
+        if re.fullmatch(r"[_*\[\]()\s]*(?:공식\s*)?(?:번안\s*)?(?:가사|lyrics|lyric|song\s*text)[_*\[\]()\s]*", line, re.IGNORECASE):
+            current = []
+            blocks.clear()
+            continue
+        if metadata_pattern.search(line):
+            if current:
+                blocks.append(current)
+                current = []
+            continue
+        if not re.search(r"[가-힣A-Za-z]", line):
+            if current:
+                blocks.append(current)
+                current = []
+            continue
+        if len(line) > 30 and re.search(r"[.!?…][\"'”’)]?$", line):
+            if current:
+                blocks.append(current)
+                current = []
+            continue
+        if len(line) > 110:
+            if current:
+                blocks.append(current)
+                current = []
+            continue
+        current.append(line)
+    if current:
+        blocks.append(current)
+
+    block = max(blocks, key=lambda lines: sum(bool(line) for line in lines), default=[])
+    if sum(bool(line) for line in block) < 5:
+        return ""
+    return "\n".join(block).strip()
+
+
 def lrclib_match(artist: str, title: str) -> dict | None:
     requested_artist = normalize(artist)
     requested_title = normalize(title)
@@ -160,6 +212,20 @@ def youtube_result_is_duplicate(result: dict, existing_results: list[dict]) -> b
     return False
 
 
+def youtube_title_match_score(requested_title: str, candidate_title: str) -> float:
+    requested = normalize(requested_title)
+    candidate = normalize(candidate_title)
+    if not requested or not candidate:
+        return 0.0
+    if requested in candidate or candidate in requested:
+        return 1.0
+    tokens = {normalize(token) for token in requested_title.split() if normalize(token)}
+    if not tokens:
+        return 0.0
+    matched = sum(1 for token in tokens if token in candidate)
+    return matched / len(tokens)
+
+
 def find_youtube_candidates(artist: str, title: str) -> list[dict[str, str]]:
     api_key = os.getenv("YOUTUBE_API_KEY")
     if not api_key:
@@ -170,7 +236,7 @@ def find_youtube_candidates(artist: str, title: str) -> list[dict[str, str]]:
             "part": "snippet",
             "q": f"{artist} {title} 가사".strip(),
             "type": "video",
-            "maxResults": 3,
+            "maxResults": 10,
             "relevanceLanguage": "ko",
             "regionCode": "KR",
             "key": api_key,
@@ -200,6 +266,7 @@ def find_youtube_candidates(artist: str, title: str) -> list[dict[str, str]]:
                 "url": f"https://www.youtube.com/watch?v={video_id}",
                 "source": "YouTube",
                 "description": "",
+                "lyrics": "",
             }
         )
 
@@ -229,6 +296,7 @@ def find_youtube_candidates(artist: str, title: str) -> list[dict[str, str]]:
     }
     for candidate in candidates:
         candidate["description"] = descriptions.get(candidate["video_id"], "")
+        candidate["lyrics"] = extract_lyrics(candidate["description"])
     return candidates
 
 
@@ -297,10 +365,28 @@ def get_lyrics(
                 provider="LRCLIB",
             )
         candidates = find_youtube_candidates(artist, title)
+        lyric_candidates = [candidate for candidate in candidates if candidate["lyrics"]]
+        requested_title = normalize(title)
+        matching_candidate = max(
+            lyric_candidates,
+            key=lambda candidate: youtube_title_match_score(title, candidate["title"]),
+            default=None,
+        )
+        if matching_candidate and youtube_title_match_score(title, matching_candidate["title"]) < 0.5:
+            matching_candidate = None
+        if matching_candidate is not None:
+            return LyricsResponse(
+                id=None,
+                artist=artist or matching_candidate["channel"],
+                title=title,
+                lyrics=matching_candidate["lyrics"],
+                source_url=matching_candidate["url"],
+                provider="YouTube",
+            )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
-                "message": "로컬 DB에서 가사를 찾을 수 없습니다. YouTube에서 영상 후보를 확인해 주세요.",
+                "message": "로컬 DB, LRCLIB 및 YouTube 영상 설명란에서 가사 형태의 본문을 찾지 못했습니다.",
                 "youtube_candidates": candidates,
             },
         )
@@ -353,7 +439,8 @@ def search_songs(
             "source_url": result["url"],
             "video_id": result["video_id"],
             "description": result["description"],
-            "lyrics_available": False,
+            "lyrics": result["lyrics"],
+            "lyrics_available": bool(result["lyrics"]),
         }
         identity = result_identity(search_result)
         if identity not in seen and not youtube_result_is_duplicate(search_result, results):

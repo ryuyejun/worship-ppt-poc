@@ -16,3 +16,5 @@ npx wrangler deploy --config cloudflare/wrangler.web.test.jsonc
 `migrations/0004-youtube-statistics.sql`을 적용하고 `YOUTUBE_API_KEY`를 Worker 비밀 변수로 설정한다. 확인된 영상 ID를 `youtube_videos`에 등록하면 한국 시간 매주 월요일 00:00에 `videos.list`로 조회수와 좋아요 원본을 갱신한다. `song_id`는 확인된 경우에만 연결한다. 한 영상의 최신 값만 보관하며 30일이 지난 통계는 삭제한다. 좋아요가 제공되지 않으면 NULL로 저장한다. 수집 대상이 없으면 통계도 없다. 순위와 증가량은 계산하지 않는다.
 
 `0005-youtube-channels.sql`도 적용하면 `youtube_channels`에 등록된 채널별 최근 업로드 최대 10개를 매주 찾아 추가한다. 영상 제목은 YouTube 원본 그대로 저장하므로 합곡·예배 전체 영상도 표시할 수 있다. 전체 영상의 통계를 첫 곡의 통계로 잘못 연결하지 않으며, `song_id`는 별도로 확인한 경우에만 설정한다.
+
+곡 검색의 `POST /providers/search`는 검색 후보의 영상 설명을 YouTube `videos.list`로 추가 조회하고, URL·홍보·출처 안내를 제외한 5줄 이상의 가사형 본문을 응답에 포함한다. 이 본문은 검색 결과와 미리보기에만 사용하며 D1에 저장하지 않는다. 검색 결과에서 가사 본문을 확인할 수 있는 후보를 선택하면 기존 PPT 제작 흐름에서 사용할 수 있다.

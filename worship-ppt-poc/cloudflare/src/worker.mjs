@@ -44,6 +44,73 @@ async function readInput(request) {
   return new TextDecoder().decode(bytes);
 }
 
+function extractLyrics(description) {
+  const metadata = /https?:\/\/|www\.|#\w+|구독|subscribe|instagram|facebook|twitter|문의|비즈니스|저작권|copyright|작사|작곡|편곡|제공|출처|후원|donat|contact|credit|앨범 소개|수록곡|lyrics by|music by|guitar|bass|drum|cello|videographer|photograph|color.?graded|video.?edit|engineer|lighting|vocal|mixed|mastered|arrange|location|special thanks|recorded|camera|director|producer|production|피아워십|워십팀|세션|촬영|편집|녹화|음향|조명|마스터링|믹싱|연주|출연/i;
+  const blocks = [];
+  let current = [];
+  for (const rawLine of String(description || '').replace(/\r\n?/g, '\n').split('\n')) {
+    const line = rawLine.replace(/^\[\d{2}:\d{2}(?:\.\d+)?\]\s*/, '').trim();
+    if (!line) {
+      if (current.length && current[current.length - 1] !== '') current.push('');
+      continue;
+    }
+    if (/^[_*\[\]()\s]*(?:공식\s*)?(?:번안\s*)?(?:가사|lyrics|lyric|song\s*text)[_*\[\]()\s]*$/i.test(line)) {
+      current = [];
+      blocks.length = 0;
+      continue;
+    }
+    if (metadata.test(line) || !/[가-힣A-Za-z]/.test(line)) {
+      if (current.length) blocks.push(current);
+      current = [];
+      continue;
+    }
+    if (line.length > 30 && /[.!?…][\"'”’)]?$/.test(line)) {
+      if (current.length) blocks.push(current);
+      current = [];
+      continue;
+    }
+    if (line.length > 110) {
+      if (current.length) blocks.push(current);
+      current = [];
+      continue;
+    }
+    current.push(line);
+  }
+  if (current.length) blocks.push(current);
+  const best = blocks.sort((left, right) => right.filter(Boolean).length - left.filter(Boolean).length)[0] || [];
+  return best.filter(Boolean).length >= 5 ? best.join('\n').trim() : '';
+}
+
+async function searchYouTubeLyrics(title, apiKey) {
+  const searchUrl = new URL('https://www.googleapis.com/youtube/v3/search');
+  searchUrl.search = new URLSearchParams({
+    part: 'snippet', q: `${title} 가사`, type: 'video', maxResults: '10',
+    relevanceLanguage: 'ko', regionCode: 'KR', key: apiKey,
+  }).toString();
+  const searchResponse = await fetch(searchUrl, { signal: AbortSignal.timeout(10000), headers: { Accept: 'application/json' } });
+  if (!searchResponse.ok) throw new Error('YouTube search failed');
+  const searchPayload = await searchResponse.json();
+  const candidates = (Array.isArray(searchPayload.items) ? searchPayload.items : []).flatMap(item => {
+    const videoId = item?.id?.videoId;
+    const snippet = item?.snippet;
+    if (!videoId || !snippet?.title) return [];
+    return [{ title: snippet.title, artist: snippet.channelTitle || '', source: 'YouTube', videoId,
+      url: `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`, description: '', lyrics: '' }];
+  });
+  if (!candidates.length) return candidates;
+
+  const videosUrl = new URL('https://www.googleapis.com/youtube/v3/videos');
+  videosUrl.search = new URLSearchParams({ part: 'snippet', id: candidates.map(item => item.videoId).join(','), key: apiKey }).toString();
+  const videosResponse = await fetch(videosUrl, { signal: AbortSignal.timeout(10000), headers: { Accept: 'application/json' } });
+  if (!videosResponse.ok) throw new Error('YouTube videos lookup failed');
+  const videosPayload = await videosResponse.json();
+  const details = new Map((Array.isArray(videosPayload.items) ? videosPayload.items : []).map(item => [item.id, item?.snippet?.description || '']));
+  return candidates.map(candidate => {
+    const description = details.get(candidate.videoId) || '';
+    return { ...candidate, lyrics: extractLyrics(description) };
+  });
+}
+
 export default {
   async scheduled(_event, env, ctx) {
     ctx.waitUntil((async () => {
@@ -108,30 +175,11 @@ export default {
         const title = typeof input?.title === 'string' ? input.title.trim().slice(0, 100) : '';
         if (!title) return ok({ candidates: [], status: ['검색어를 입력해 주세요'] });
         if (!env.YOUTUBE_API_KEY) return ok({ candidates: [], status: ['YouTube 검색 키가 설정되지 않았습니다'] });
-        const youtubeUrl = new URL('https://www.googleapis.com/youtube/v3/search');
-        youtubeUrl.search = new URLSearchParams({
-          part: 'snippet', q: `${title} 찬양 가사`, type: 'video', maxResults: '5',
-          relevanceLanguage: 'ko', regionCode: 'KR', key: env.YOUTUBE_API_KEY,
-        }).toString();
         try {
-          const response = await fetch(youtubeUrl, { headers: { Accept: 'application/json' } });
-          if (!response.ok) return ok({ candidates: [], status: ['YouTube 검색을 불러오지 못했습니다'] });
-          const payload = await response.json();
-          const candidates = (Array.isArray(payload.items) ? payload.items : []).flatMap(item => {
-            const videoId = item?.id?.videoId;
-            const snippet = item?.snippet;
-            if (!videoId || !snippet?.title) return [];
-            return [{
-              title: snippet.title,
-              artist: snippet.channelTitle || '',
-              source: 'YouTube',
-              videoId,
-              url: `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`,
-            }];
-          });
-          return ok({ candidates, status: [`YouTube 영상 후보 ${candidates.length}개`] });
+          const candidates = await searchYouTubeLyrics(title, env.YOUTUBE_API_KEY);
+          return ok({ candidates, status: [`YouTube에서 가사 본문 ${candidates.filter(item => item.lyrics).length}개 확인`] });
         } catch {
-          return ok({ candidates: [], status: ['YouTube 검색 연결에 실패했습니다'] });
+          return ok({ candidates: [], status: ['YouTube 가사 검색에 실패했습니다'] });
         }
       }
       return ok(await findArtwork(env.DB, input?.songId, env.PIXABAY_API_KEY, input?.title));
