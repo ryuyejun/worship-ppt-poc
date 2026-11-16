@@ -234,10 +234,17 @@ footer.app-footer.closing { height: auto; min-height: 0; padding: 18px 40px 20px
 
 /* PPT 편집 화면: Figma 557:410의 1512×982 프레임 비율과 레이어 재현 */
 .app-nav .nav__bar { max-width: none; padding-inline: 24px; }
-.editor-page { display: grid; grid-template-columns: 231px minmax(0, 1fr) 239px; position: relative; width: 100%; height: 100dvh; min-height: 560px; overflow: hidden; background: #e7e7e7; }
+.editor-page { --editor-sidebar-width: 231px; --inspector-width: 300px; display: grid; grid-template-columns: var(--editor-sidebar-width) minmax(0, 1fr) var(--inspector-width); position: relative; width: 100%; height: 100dvh; min-height: 560px; overflow: hidden; background: #e7e7e7; }
+.editor-page.is-inspector-left { grid-template-columns: var(--editor-sidebar-width) var(--inspector-width) minmax(0, 1fr); }
+.editor-page > .editor-workspace { grid-column: 2; grid-row: 1; }
+.editor-page.is-inspector-left > .editor-inspector { grid-column: 2; grid-row: 1; }
+.editor-page.is-inspector-left > .editor-workspace { grid-column: 3; grid-row: 1; }
 .editor-sidebar, .editor-inspector { position: relative; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; background: rgba(255,255,255,.7); -webkit-backdrop-filter: blur(10px) saturate(140%); backdrop-filter: blur(10px) saturate(140%); }
 .editor-sidebar { z-index: 2; }
 .editor-inspector { z-index: 3; }
+.inspector-resize-handle { position: absolute; z-index: 6; top: 0; bottom: 0; left: 0; width: 7px; cursor: col-resize; touch-action: none; }
+.inspector-resize-handle.is-left { right: 0; left: auto; }
+.inspector-resize-handle:hover, .inspector-resize-handle:focus-visible, .inspector-resize-handle:active { background: rgba(54, 151, 197, .55); outline: none; }
 .editor-brand { position: absolute; top: 15px; left: 10px; display: flex; width: 112px; height: 55px; align-items: center; gap: 5px; color: #111; text-decoration: none; }
 .editor-brand img { width: 55px; height: 55px; flex: 0 0 55px; object-fit: cover; }
 .editor-brand span { display: grid; gap: 2px; }
@@ -421,6 +428,8 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
 .filmstrip-add:focus-visible { outline: 2px solid #2383bb; outline-offset: 2px; }
 .editor-inspector { border-left: 0; }
 .inspector-heading { display: flex; min-height: 70px; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid rgba(0,0,0,.12); padding: 12px 14px; }
+.inspector-dock-toggle { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border: 1px solid rgba(0,0,0,.12); border-radius: 6px; background: rgba(255,255,255,.7); color: #56616a; font-size: 18px; line-height: 1; cursor: pointer; }
+.inspector-dock-toggle:hover { border-color: #8cbad1; background: #f4fbff; color: #1879b8; }
 .inspector-heading h2 { margin: 0; color: #252b30; font-size: 16px; font-weight: 650; }
 .inspector-controls { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px; }
 .inspector-controls > .style-field { margin-bottom: 20px; }
@@ -445,7 +454,7 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
 .editor-queue-link span { color: inherit; font-size: inherit; }
 .inspector-footer .btn { width: 100%; min-height: 42px; font-size: 13px; }
 @media (max-width: 1120px) {
-  .editor-page { grid-template-columns: 220px minmax(0, 1fr) 260px; }
+  .editor-page { --editor-sidebar-width: 220px; }
   .editor-brand { left: 10px; }
   .editor-search-shell { width: calc(100% - 20px); }
   .editor-search { width: 100%; }
@@ -460,6 +469,10 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
 }
 @media (max-width: 860px) {
   .editor-page { grid-template-columns: 220px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; height: auto; min-height: 100dvh; overflow: visible; }
+  .editor-page.is-inspector-left { grid-template-columns: 220px minmax(0, 1fr); }
+  .editor-page > .editor-workspace, .editor-page.is-inspector-left > .editor-workspace { grid-column: 2; grid-row: 1; }
+  .editor-page.is-inspector-left > .editor-inspector { grid-column: 2; grid-row: 2; }
+  .inspector-resize-handle { display: none; }
   .editor-sidebar { grid-column: 1; grid-row: 1 / 3; min-height: 100dvh; }
   main.editor-page > section.editor-workspace { grid-column: 2; grid-row: 1; min-height: 64dvh; }
   .editor-inspector { grid-column: 2; grid-row: 2; min-height: 420px; border-top: 1px solid rgba(0,0,0,.12); border-left: 0; }

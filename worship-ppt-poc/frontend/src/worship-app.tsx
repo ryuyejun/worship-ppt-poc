@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { api, cloudflareMode } from './api';
 import type { Song, SongRequest } from './types';
 import { collectSlides, renderSlide, type Slide, type SlideSize, type SlideStyle, type SlideTextPosition } from './presentation';
@@ -90,6 +90,12 @@ function downloadPpt(blob: Blob, name: string) {
 export function WorshipApp() {
   const [page, setPage] = useState<'create' | 'manage'>(window.location.hash === '#manage' ? 'manage' : 'create');
   const [navOpen, setNavOpen] = useState(false);
+  const [inspectorDock, setInspectorDock] = useState<'left' | 'right'>(() => localStorage.getItem('yebit-inspector-dock') === 'left' ? 'left' : 'right');
+  const [inspectorWidth, setInspectorWidth] = useState(() => {
+    const savedWidth = Number(localStorage.getItem('yebit-inspector-width'));
+    return Number.isFinite(savedWidth) && savedWidth >= 240 && savedWidth <= 520 ? savedWidth : 300;
+  });
+  const inspectorResizeRef = useRef<{ pointerId: number; startX: number; startWidth: number; dock: 'left' | 'right' } | null>(null);
   const [readySongs, setReadySongs] = useState<Song[]>([]);
   const [allSongs, setAllSongs] = useState<Song[]>([]);
   const [query, setQuery] = useState('');
@@ -101,6 +107,29 @@ export function WorshipApp() {
   const originalSongOrderRef = useRef<number[] | null>(null);
   const pendingSongPositionsRef = useRef<Map<number, number>>(new Map());
   const [draggedSongId, setDraggedSongId] = useState<number | null>(null);
+
+  useEffect(() => { localStorage.setItem('yebit-inspector-width', String(inspectorWidth)); }, [inspectorWidth]);
+  useEffect(() => { localStorage.setItem('yebit-inspector-dock', inspectorDock); }, [inspectorDock]);
+
+  function startInspectorResize(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    inspectorResizeRef.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: inspectorWidth, dock: inspectorDock };
+  }
+
+  function resizeInspector(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = inspectorResizeRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const direction = drag.dock === 'left' ? 1 : -1;
+    setInspectorWidth(Math.max(240, Math.min(520, drag.startWidth + (event.clientX - drag.startX) * direction)));
+  }
+
+  function stopInspectorResize(event: ReactPointerEvent<HTMLDivElement>) {
+    if (inspectorResizeRef.current?.pointerId !== event.pointerId) return;
+    inspectorResizeRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }
   const artworkAttempts = useRef(new Set<string>());
   const artworkQueue = useRef<(Pick<Song, 'id' | 'title'> & { artist?: string | null })[]>([]);
   const activeArtworkRequests = useRef(0);
@@ -929,7 +958,7 @@ export function WorshipApp() {
       </header>}
 
       {page === 'create' ? (
-        <main className="editor-page" id="create" onPointerDownCapture={(event) => { const target = event.target; if (target instanceof Element && target.closest('.editor-slide-text, .text-box-handle')) return; setSelectedTextSlide(null); }}>
+        <main className={`editor-page${inspectorDock === 'left' ? ' is-inspector-left' : ''}`} id="create" style={{ '--inspector-width': `${inspectorWidth}px` } as CSSProperties} onPointerDownCapture={(event) => { const target = event.target; if (target instanceof Element && target.closest('.editor-slide-text, .text-box-handle, .inspector-resize-handle')) return; setSelectedTextSlide(null); }}>
           <aside className="editor-sidebar" aria-label="찬양 곡 선택">
             <a className="editor-brand" href="#create" aria-label="Yebit 찬양 PPT 제작">
               <img src="/assets/figma/editor-logo.png" width="42" height="42" alt="" />
@@ -1000,7 +1029,8 @@ export function WorshipApp() {
             </div>
           </section>
           <aside className="editor-inspector" aria-label="슬라이드 편집">
-            <div className="inspector-heading"><div><p className="editor-kicker">편집 도구</p><h2>슬라이드 디자인</h2></div><span className="editor-count">{preview ? `${preview.slideIndex + 1} / ${preview.slideCount}` : '—'}</span></div>
+            <div className={`inspector-resize-handle is-${inspectorDock}`} role="separator" aria-orientation="vertical" aria-label="편집 도구 너비 조절" aria-valuemin={240} aria-valuemax={520} aria-valuenow={Math.round(inspectorWidth)} tabIndex={0} onPointerDown={startInspectorResize} onPointerMove={resizeInspector} onPointerUp={stopInspectorResize} onPointerCancel={stopInspectorResize} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); const direction = event.key === 'ArrowRight' ? 1 : -1; setInspectorWidth((width) => Math.max(240, Math.min(520, width + direction * (event.shiftKey ? 32 : 12)))); } }} />
+            <div className="inspector-heading"><div><p className="editor-kicker">편집 도구</p><h2>슬라이드 디자인</h2></div><span className="editor-count">{preview ? `${preview.slideIndex + 1} / ${preview.slideCount}` : '—'}</span><button className="inspector-dock-toggle" type="button" onClick={() => setInspectorDock((dock) => dock === 'right' ? 'left' : 'right')} aria-label={inspectorDock === 'right' ? '편집 도구를 왼쪽에 배치' : '편집 도구를 오른쪽에 배치'} title={inspectorDock === 'right' ? '왼쪽 벽에 배치' : '오른쪽 벽에 배치'}>{inspectorDock === 'right' ? '⇤' : '⇥'}</button></div>
             <div className="inspector-controls">
               <label className="style-field"><span>템플릿</span><select value={template} onChange={(event) => { const value = event.target.value; setTemplate(value); if (templateStyles[value]) setPptStyle({ ...templateStyles[value] }); }}><option value="original">기본 남색</option><option value="sky">맑은 하늘</option><option value="white">깔끔한 흰색</option><option value="black">선명한 검정</option><option value="custom">직접 설정</option></select></label>
               <div className="inspector-group"><h3>색상</h3><div className="style-grid"><label className="style-field"><span>배경</span><input type="color" value={pptStyle.backgroundColor} onChange={(event) => updateStyle({ backgroundColor: event.target.value })} /></label><label className="style-field"><span>글자</span><input type="color" value={slideTextColors[previewIndex] ?? pptStyle.textColor} onChange={(event) => setSlideTextColors((colors) => ({ ...colors, [previewIndex]: event.target.value }))} /></label></div></div>
