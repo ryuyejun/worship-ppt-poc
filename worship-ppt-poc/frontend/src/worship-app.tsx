@@ -1059,10 +1059,10 @@ export function WorshipApp() {
               <form className="auth-form" onSubmit={submitAuth}>
                 <label>이메일<input type="email" autoComplete="email" required maxLength={254} value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="이메일 주소" /></label>
                 <label>비밀번호<input type="password" autoComplete={authMode === 'login' ? 'current-password' : 'new-password'} required minLength={10} maxLength={128} value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} placeholder={authMode === 'signup' ? '10자 이상 입력' : '비밀번호'} /></label>
+                {authMode === 'signup' && authPassword.length > 0 && authPassword.length < 10 && <p className="auth-password-hint" role="status" aria-live="polite">비밀번호를 10자 이상 입력해 주세요. ({authPassword.length}/10)</p>}
                 {authError && <p className="auth-error" role="alert">{authError}</p>}
                 <button className="auth-submit" type="submit" disabled={authSubmitting}>{authSubmitting ? '처리 중…' : authMode === 'login' ? '로그인' : '회원가입'}</button>
               </form>
-              {authMode === 'signup' && <p className="auth-help">비밀번호는 10자 이상으로 설정해 주세요.</p>}
             </>}
           </div>
         </div>
