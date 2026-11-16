@@ -177,7 +177,8 @@ export default {
         if (!env.YOUTUBE_API_KEY) return ok({ candidates: [], status: ['YouTube 검색 키가 설정되지 않았습니다'] });
         try {
           const candidates = await searchYouTubeLyrics(title, env.YOUTUBE_API_KEY);
-          return ok({ candidates, status: [`YouTube에서 가사 본문 ${candidates.filter(item => item.lyrics).length}개 확인`] });
+          const lyricCandidates = candidates.filter(item => item.lyrics.trim());
+          return ok({ candidates: lyricCandidates, status: [`YouTube에서 가사 본문 ${lyricCandidates.length}개 확인`] });
         } catch {
           return ok({ candidates: [], status: ['YouTube 가사 검색에 실패했습니다'] });
         }

@@ -387,7 +387,7 @@ def get_lyrics(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "message": "로컬 DB, LRCLIB 및 YouTube 영상 설명란에서 가사 형태의 본문을 찾지 못했습니다.",
-                "youtube_candidates": candidates,
+                "youtube_candidates": lyric_candidates,
             },
         )
     return LyricsResponse(
@@ -432,6 +432,8 @@ def search_songs(
             seen.add(identity)
 
     for result in find_youtube_candidates(artist, title):
+        if not result["lyrics"].strip():
+            continue
         search_result = {
             "title": result["title"],
             "artist": result["channel"],

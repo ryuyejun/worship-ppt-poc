@@ -534,7 +534,7 @@ export function WorshipApp() {
         const uniqueVideoTitles = new Set<string>();
         const videos = providers.data.candidates.filter((candidate) => {
           const title = normalizeSearchTitle(candidate.title);
-          if (!title || uniqueVideoTitles.has(title) || knownTitles.some((known) => title.includes(known))) return false;
+          if (!candidate.lyrics?.trim() || !title || uniqueVideoTitles.has(title) || knownTitles.some((known) => title.includes(known))) return false;
           uniqueVideoTitles.add(title);
           return true;
         });
@@ -752,7 +752,7 @@ export function WorshipApp() {
                   {searching && <p className="search-result-hint">곡을 찾고 있습니다…</p>}
                   {!searching && !searchNotice && <p className="search-result-hint">Enter를 누르면 전체 검색을 시작합니다.</p>}
                   {searchNotice && <p className={`search-result-hint ${searchNotice.kind ?? ''}`}>{searchNotice.text}</p>}
-                  {providerInfo.length > 0 && <div className="search-result-group"><span>YouTube 검색 결과 · 가사 본문을 확인할 수 있습니다</span>{providerInfo.map((song, index) => song.lyrics?.trim() ? <button className="search-result-row" key={`${song.videoId || song.source}-${index}`} type="button" onClick={() => selectSong({ id: -(100000000 + index), title: song.title, artist: song.artist || null, author: null, composer: null, category: null, hymnNumber: null, status: 'USER_SUPPLIED', source: song.url, lyrics: song.lyrics })}><strong>{song.title}</strong><small>{song.artist} · 가사 미리보기</small></button> : <a className="search-result-row" key={`${song.videoId || song.source}-${index}`} href={song.url} target="_blank" rel="noreferrer"><strong>{song.title}</strong><small>{song.artist} · 설명란에서 가사 본문을 찾지 못했습니다</small></a>)}</div>}
+                  {providerInfo.length > 0 && <div className="search-result-group"><span>YouTube에서 찾은 가사 · {providerInfo.length}곡</span>{providerInfo.map((song, index) => <button className="search-result-row" key={`${song.videoId || song.source}-${index}`} type="button" onClick={() => selectSong({ id: -(100000000 + index), title: song.title, artist: song.artist || null, author: null, composer: null, category: null, hymnNumber: null, status: 'USER_SUPPLIED', source: song.url, lyrics: song.lyrics })}><strong>{song.title}</strong><small>{song.artist} · 가사 미리보기</small></button>)}</div>}
                   {externalResults.length > 0 && <div className="search-result-group"><span>LRCLIB 검색 결과 · {externalResults.length}</span>{externalResults.map((song) => <button className="search-result-row" key={song.id} type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>{displayPerson(song.artist)} · {displayPerson(song.album)}</small></button>)}</div>}
                   {results.length > 0 && <div className="search-result-group"><span>내 곡 목록 · {results.length}</span>{results.map((song) => <div className="editor-favorite-row" key={song.id}><button className="search-result-row" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>작사 {displayPerson(song.author)}</small></button><button className={`favorite-toggle${favoriteIds.includes(song.id) ? ' is-favorite' : ''}`} type="button" onClick={() => toggleFavorite(song)} aria-label={favoriteIds.includes(song.id) ? `${song.title} 즐겨찾기 해제` : `${song.title} 즐겨찾기 추가`}>{favoriteIds.includes(song.id) ? '★' : '☆'}</button></div>)}</div>}
                 </div>}
