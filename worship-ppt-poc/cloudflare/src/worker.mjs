@@ -246,20 +246,24 @@ export default {
         const title = typeof input?.title === 'string' ? input.title.normalize('NFC').trim().slice(0, 100) : '';
         if (!Number.isSafeInteger(songId) || songId === 0 || !title) return fail('곡 정보를 확인해 주세요.', 400);
         const cached = songId > 0 ? await env.DB.prepare('SELECT song_title AS title, video_id AS videoId, fetched_at AS fetchedAt FROM youtube_song_thumbnails WHERE song_id = ?').bind(songId).first() : null;
-        if (cached?.title === title && Date.now() - Date.parse(cached.fetchedAt) < 7 * 24 * 60 * 60 * 1000) {
+        if (cached?.videoId && cached.title === title && Date.now() - Date.parse(cached.fetchedAt) < 7 * 24 * 60 * 60 * 1000) {
           return ok({ videoId: cached.videoId, imageUrl: cached.videoId ? `/youtube-thumbnail/${cached.videoId}` : null });
         }
         if (!env.YOUTUBE_API_KEY) return ok({ videoId: null, imageUrl: null });
         const search = new URL('https://www.googleapis.com/youtube/v3/search');
-        search.search = new URLSearchParams({ part: 'snippet', q: `${title} 찬양`, type: 'video', maxResults: '5', relevanceLanguage: 'ko', regionCode: 'KR', key: env.YOUTUBE_API_KEY }).toString();
+        const artist = typeof input?.artist === 'string' && !/^(미확인|정보 없음|unknown)$/i.test(input.artist.trim()) ? input.artist.trim().slice(0, 100) : '';
+        const searchTitle = title.replace(/\s*\((?:feat\.?|ft\.?|prod\.?)[^)]*\)/ig, '').trim();
+        const koreanTitle = Array.from(searchTitle.matchAll(/\(([^)]+)\)/g), match => match[1]).find(value => /[가-힣]/.test(value));
+        search.search = new URLSearchParams({ part: 'snippet', q: `${artist} ${koreanTitle || searchTitle}`.trim(), type: 'video', maxResults: '10', relevanceLanguage: 'ko', regionCode: 'KR', key: env.YOUTUBE_API_KEY }).toString();
         const found = await fetch(search, { signal: AbortSignal.timeout(8000) });
         if (!found.ok) return ok({ videoId: null, imageUrl: null });
         const payload = await found.json();
         const normalize = value => String(value || '').normalize('NFC').toLocaleLowerCase('ko-KR').replace(/[^\p{L}\p{N}]/gu, '');
-        const wanted = normalize(title);
+        const variants = [searchTitle, ...Array.from(searchTitle.matchAll(/\(([^)]+)\)/g), match => match[1]), searchTitle.replace(/\([^)]*\)/g, '').trim()]
+          .map(normalize).filter(value => value.length >= 2);
         const candidate = (Array.isArray(payload.items) ? payload.items : []).find(item => {
           const candidateTitle = normalize(item?.snippet?.title);
-          return candidateTitle.length > 0 && (candidateTitle.includes(wanted) || wanted.includes(candidateTitle));
+          return variants.some(wanted => candidateTitle.includes(wanted));
         });
         const videoId = /^[A-Za-z0-9_-]{11}$/.test(candidate?.id?.videoId || '') ? candidate.id.videoId : null;
         if (songId > 0) await env.DB.prepare(`INSERT INTO youtube_song_thumbnails(song_id,song_title,video_id,fetched_at) VALUES(?,?,?,?)

@@ -98,7 +98,7 @@ export function WorshipApp() {
   const searchWidgetRef = useRef<HTMLDivElement>(null);
   const selectedQueueRef = useRef<HTMLElement>(null);
   const artworkAttempts = useRef(new Set<string>());
-  const artworkQueue = useRef<Pick<Song, 'id' | 'title'>[]>([]);
+  const artworkQueue = useRef<(Pick<Song, 'id' | 'title'> & { artist?: string | null })[]>([]);
   const activeArtworkRequests = useRef(0);
   const createPptShortcut = useRef<() => void>(() => undefined);
   const addSelectionShortcut = useRef<(song: Song) => void>(() => undefined);
@@ -331,9 +331,9 @@ export function WorshipApp() {
     } else setPptNotice({ text: '최근 선택한 곡을 다시 불러오지 못했습니다.', kind: 'error' });
   }
 
-  async function loadSongArtwork(song: Pick<Song, 'id' | 'title'>) {
+  async function loadSongArtwork(song: Pick<Song, 'id' | 'title'> & { artist?: string | null }) {
     try {
-      const response = await api<{ videoId: string | null; imageUrl: string | null }>('/youtube-thumbnail/search', { songId: song.id, title: song.title });
+      const response = await api<{ videoId: string | null; imageUrl: string | null }>('/youtube-thumbnail/search', { songId: song.id, title: song.title, artist: song.artist });
       const imageUrl = response.data.videoId ? youtubeThumbnailUrl(response.data.videoId) : undefined;
       if (!imageUrl) {
         setFavoriteArtwork((items) => ({ ...items, [song.id]: { imageUrl: '' } }));
@@ -369,7 +369,7 @@ export function WorshipApp() {
     }
   }
 
-  function requestSongArtwork(song: Pick<Song, 'id' | 'title'>) {
+  function requestSongArtwork(song: Pick<Song, 'id' | 'title'> & { artist?: string | null }) {
     const key = `${song.id}:${song.title}`;
     if (artworkAttempts.current.has(key)) return;
     artworkAttempts.current.add(key);
