@@ -344,9 +344,19 @@ footer.app-footer.closing { height: auto; min-height: 0; padding: 18px 40px 20px
 .selected-actions button:hover:not(:disabled) { background: #f1f5f7; color: #1879b8; }
 main.editor-page > section.editor-workspace { position: relative; z-index: 1; display: flex; min-width: 0; min-height: 0; height: auto; flex-direction: column; overflow: visible; padding: 0; background: #e7e7e7; }
 .editor-toolbar { position: relative; z-index: 1; flex: 0 0 70px; height: 70px; border-right: 1px solid rgba(0,0,0,.2); border-bottom: 0; border-left: 1px solid rgba(0,0,0,.2); background: rgba(255,255,255,.7); padding: 0; }
-.editor-document-title { position: absolute; top: 20px; left: 26px; display: flex; width: 122px; height: 30px; align-items: center; gap: 5px; border-bottom: 1px solid #111; padding: 0 0 5px; }
-.editor-document-title input { width: 101px; min-width: 0; border: 0; outline: 0; background: transparent; color: #111; font-size: 16px; font-weight: 400; line-height: 19px; }
-.editor-document-title img { width: 16px; height: 16px; flex: 0 0 16px; }
+.editor-toolbar__left { position: absolute; top: 0; left: 26px; display: flex; height: 100%; align-items: center; gap: 20px; }
+.editor-title-control { position: relative; min-width: 0; }
+.editor-document-title { display: flex; max-width: min(300px, 32vw); height: 38px; align-items: center; gap: 12px; overflow: hidden; border: 0; border-radius: 7px; background: transparent; padding: 0 8px; color: #4d5666; font: inherit; text-align: left; cursor: pointer; }
+.editor-document-title:hover, .editor-document-title[aria-expanded="true"] { background: rgba(240,240,243,.75); }
+.editor-document-title:focus-visible { outline: 2px solid #85b9d8; outline-offset: 2px; }
+.editor-document-title svg { width: 22px; height: 22px; flex: 0 0 22px; }
+.editor-document-title span { overflow: hidden; font-size: 17px; font-weight: 500; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.editor-title-edit { position: absolute; z-index: 10; top: calc(100% + 8px); left: 0; display: grid; width: min(320px, calc(100vw - 32px)); gap: 8px; border: 1px solid rgba(255,255,255,.9); border-radius: 12px; background: rgba(255,255,255,.94); padding: 12px; box-shadow: 0 10px 28px rgba(42,55,75,.16); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); }
+.editor-title-edit > label { color: #68717b; font-size: 12px; }
+.editor-title-edit > div { display: flex; align-items: center; gap: 8px; }
+.editor-title-edit input { width: 100%; min-width: 0; height: 38px; border: 1px solid #d9dee4; border-radius: 7px; background: #fff; padding: 0 10px; color: #303943; font: inherit; }
+.editor-title-edit input:focus { border-color: #7bb7da; outline: 2px solid rgba(123,183,218,.18); }
+.editor-title-edit button { flex: 0 0 auto; height: 38px; border: 0; border-radius: 7px; background: #edf5fa; padding: 0 12px; color: #31536b; cursor: pointer; }
 .editor-page-count { position: absolute; top: 20px; left: 206px; display: flex; width: 104px; height: 30px; align-items: center; justify-content: center; border-bottom: 1px solid #111; padding: 5px 11px; color: #111; font-size: 16px; font-weight: 400; white-space: nowrap; }
 .editor-stage { display: block; flex: 1; min-height: 0; overflow: auto; padding: 20px 0 24px; scroll-behavior: smooth; }
 .editor-page-stack { display: grid; justify-items: center; gap: 48px; width: 100%; min-height: 100%; }
@@ -426,6 +436,8 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
   .editor-search-shell { width: calc(100% - 20px); }
   .editor-search { width: 100%; }
   .editor-tabs { width: calc(100% - 26px); gap: 14px; }
+  .editor-toolbar__left { left: 16px; gap: 12px; }
+  .editor-document-title { max-width: 200px; }
   .filmstrip-page, .filmstrip-canvas { width: 150px; }
   .filmstrip-page { flex-basis: 150px; height: 108px; }
   .filmstrip-canvas { height: 84px; }
@@ -436,6 +448,7 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
   .editor-sidebar { grid-column: 1; grid-row: 1 / 3; min-height: 100dvh; }
   main.editor-page > section.editor-workspace { grid-column: 2; grid-row: 1; min-height: 64dvh; }
   .editor-inspector { grid-column: 2; grid-row: 2; min-height: 420px; border-top: 1px solid rgba(0,0,0,.12); border-left: 0; }
+  .editor-document-title { max-width: 170px; }
   .inspector-controls { overflow: visible; }
   .inspector-footer { grid-template-columns: auto 1fr; align-items: center; }
 }
@@ -444,6 +457,8 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
   main.editor-page > section.editor-workspace { order: 1; min-height: 58dvh; }
   .editor-sidebar { order: 2; min-height: 520px; border-top: 1px solid rgba(0,0,0,.12); border-right: 0; }
   .editor-inspector { order: 3; min-height: 520px; border-top: 1px solid rgba(0,0,0,.12); }
+  .editor-toolbar__left { left: 8px; gap: 8px; }
+  .editor-document-title { max-width: min(190px, calc(100vw - 230px)); gap: 8px; }
   .editor-controls { overflow: visible; }
   .editor-stage { min-height: 300px; padding-bottom: 32px; }
   .editor-page-stack { gap: 24px; }
@@ -464,7 +479,7 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
 @media (prefers-reduced-motion: reduce) {
   .editor-search-widget { transition: none; }
 }
-.editor-size-control { position:absolute; top:18px; left:206px; z-index:5; }
+.editor-size-control { position:relative; z-index:5; flex:0 0 auto; }
 .editor-size-control .editor-page-count { position:static; display:flex; width:160px; height:34px; align-items:center; justify-content:space-between; gap:8px; border:0; border-radius:9px; background:#f0f0f3; padding:0 10px; color:#64697a; font-size:15px; font-weight:500; letter-spacing:-.035em; white-space:nowrap; cursor:pointer; transition:background-color .18s ease; }
 .editor-size-control .editor-page-count:hover { background:#e9e9ed; }
 .editor-size-control .editor-page-count:focus-visible { outline:2px solid #85b9d8; outline-offset:2px; }
