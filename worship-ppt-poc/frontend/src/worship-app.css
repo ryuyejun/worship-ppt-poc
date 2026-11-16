@@ -244,9 +244,14 @@ footer.app-footer.closing { height: auto; min-height: 0; padding: 18px 40px 20px
 .editor-sidebar, .editor-inspector { position: relative; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; background: rgba(255,255,255,.7); -webkit-backdrop-filter: blur(10px) saturate(140%); backdrop-filter: blur(10px) saturate(140%); }
 .editor-sidebar { z-index: 2; }
 .editor-inspector { z-index: 3; }
-.inspector-resize-handle { position: absolute; z-index: 6; top: 0; bottom: 0; left: 0; width: 7px; cursor: col-resize; touch-action: none; }
-.inspector-resize-handle.is-left { right: 0; left: auto; }
-.inspector-resize-handle:hover, .inspector-resize-handle:focus-visible, .inspector-resize-handle:active { background: transparent; outline: none; }
+.inspector-resize-handle { position: absolute; z-index: 9; top: 0; bottom: 0; left: calc(100% - var(--inspector-width) - 4px); width: 8px; cursor: col-resize; touch-action: none; }
+.inspector-resize-handle.is-left { left: calc(var(--editor-sidebar-width) + var(--inspector-width) - 4px); }
+.inspector-resize-handle.is-collapsed.is-right { left: auto; right: 0; width: 12px; }
+.inspector-resize-handle.is-collapsed.is-left { left: var(--editor-sidebar-width); width: 12px; }
+.inspector-resize-handle::after { position: absolute; top: 50%; left: 3px; width: 2px; height: 38px; transform: translateY(-50%); border-radius: 2px; background: rgba(70,80,90,.28); content: ''; pointer-events: none; }
+.inspector-resize-handle.is-left::after { right: 3px; left: auto; }
+.inspector-resize-handle.is-collapsed::after { right: 5px; left: auto; }
+.inspector-resize-handle:focus-visible { outline: 1px solid rgba(90,100,110,.45); outline-offset: -2px; }
 .editor-brand { position: absolute; top: 15px; left: 10px; display: flex; width: 112px; height: 55px; align-items: center; gap: 5px; color: #111; text-decoration: none; }
 .editor-brand img { width: 55px; height: 55px; flex: 0 0 55px; object-fit: cover; }
 .editor-brand span { display: grid; gap: 2px; }
@@ -429,16 +434,7 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
 .filmstrip-add:hover { border-color: #4ca9d8; background: #fff; color: #237eac; }
 .filmstrip-add:focus-visible { outline: 2px solid #2383bb; outline-offset: 2px; }
 .editor-inspector { border-left: 0; }
-.inspector-heading { display: flex; min-height: 70px; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid rgba(0,0,0,.12); padding: 12px 14px; }
-.inspector-dock-toggle { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border: 1px solid rgba(0,0,0,.12); border-radius: 6px; background: rgba(255,255,255,.7); color: #56616a; font-size: 18px; line-height: 1; cursor: pointer; }
-.inspector-dock-toggle:hover { border-color: #8cbad1; background: #f4fbff; color: #1879b8; }
-.inspector-hide-toggle { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border: 1px solid rgba(0,0,0,.12); border-radius: 6px; background: rgba(255,255,255,.7); color: #56616a; font-size: 20px; line-height: 1; cursor: pointer; }
-.inspector-hide-toggle:hover { background: #f1f2f3; color: #252b30; }
-.inspector-reopen-tab { position: absolute; z-index: 8; top: 50%; display: flex; min-height: 88px; align-items: center; justify-content: center; gap: 4px; transform: translateY(-50%); border: 1px solid rgba(0,0,0,.16); background: rgba(255,255,255,.92); padding: 10px 6px; color: #425261; box-shadow: 0 3px 12px rgba(25,40,55,.12); cursor: pointer; }
-.inspector-reopen-tab.is-right { right: 0; border-right: 0; border-radius: 8px 0 0 8px; }
-.inspector-reopen-tab.is-left { left: var(--editor-sidebar-width); border-left: 0; border-radius: 0 8px 8px 0; }
-.inspector-reopen-tab span { writing-mode: vertical-rl; font-size: 11px; }
-.inspector-reopen-tab:hover { background: #fff; color: #17283b; }
+.inspector-heading { display: flex; min-height: 70px; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid rgba(0,0,0,.12); padding: 12px 14px; cursor: grab; touch-action: none; user-select: none; }
 .inspector-heading h2 { margin: 0; color: #252b30; font-size: 16px; font-weight: 650; }
 .inspector-controls { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px; }
 .inspector-controls > .style-field { margin-bottom: 20px; }
@@ -482,7 +478,12 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
   .editor-page.is-inspector-collapsed, .editor-page.is-inspector-left.is-inspector-collapsed { grid-template-columns: 220px minmax(0, 1fr); }
   .editor-page > .editor-workspace, .editor-page.is-inspector-left > .editor-workspace { grid-column: 2; grid-row: 1; }
   .editor-page.is-inspector-left > .editor-inspector { grid-column: 2; grid-row: 2; }
-  .inspector-resize-handle { display: none; }
+  .inspector-resize-handle { position: fixed; top: 50%; right: 0; bottom: auto; left: auto; width: 12px; height: 72px; transform: translateY(-50%); border-radius: 8px 0 0 8px; background: rgba(255,255,255,.76); box-shadow: 0 1px 8px rgba(0,0,0,.1); }
+  .inspector-resize-handle.is-left, .inspector-resize-handle.is-collapsed.is-left { right: auto; left: 0; }
+  .inspector-resize-handle::after, .inspector-resize-handle.is-left::after, .inspector-resize-handle.is-collapsed::after { top: 50%; right: 5px; left: auto; width: 2px; height: 32px; transform: translateY(-50%); }
+  .inspector-resize-handle { cursor: ns-resize; }
+  .inspector-heading:active { cursor: grabbing; }
+  .inspector-dock-grip { color: #87919a; font-size: 16px; }
   .editor-sidebar { grid-column: 1; grid-row: 1 / 3; min-height: 100dvh; }
   main.editor-page > section.editor-workspace { grid-column: 2; grid-row: 1; min-height: 64dvh; }
   .editor-inspector { grid-column: 2; grid-row: 2; min-height: 420px; border-top: 1px solid rgba(0,0,0,.12); border-left: 0; }
@@ -493,7 +494,7 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
 }
 @media (max-width: 620px) {
   .editor-page { display: flex; min-height: 100dvh; flex-direction: column; overflow: visible; }
-  .inspector-reopen-tab { position: fixed; top: auto; bottom: 16px; min-height: 76px; transform: none; }
+  .inspector-resize-handle { top: 52%; }
   main.editor-page > section.editor-workspace { order: 1; min-height: 58dvh; }
   .editor-sidebar { order: 2; min-height: 520px; border-top: 1px solid rgba(0,0,0,.12); border-right: 0; }
   .editor-inspector { order: 3; min-height: 520px; border-top: 1px solid rgba(0,0,0,.12); }
