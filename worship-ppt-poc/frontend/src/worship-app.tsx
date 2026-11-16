@@ -141,6 +141,7 @@ export function WorshipApp() {
     }
   });
   const [favoriteArtwork, setFavoriteArtwork] = useState<Record<number, FavoriteArtwork>>({});
+  const [pendingFavoriteRemovals, setPendingFavoriteRemovals] = useState<number[]>([]);
   const [songSelectionCounts, setSongSelectionCounts] = useState<Record<number, number>>(() => {
     try {
       const stored = window.localStorage.getItem('yebit.song-selection-counts');
@@ -380,11 +381,20 @@ export function WorshipApp() {
   function toggleFavorite(song: Song) {
     if (song.id <= 0) return;
     if (favoriteIds.includes(song.id)) {
-      setFavoriteIds((ids) => ids.filter((id) => id !== song.id));
+      if (editorTab === 'favorites') setPendingFavoriteRemovals((ids) => ids.includes(song.id) ? ids.filter((id) => id !== song.id) : [...ids, song.id]);
+      else setFavoriteIds((ids) => ids.filter((id) => id !== song.id));
       return;
     }
     requestSongArtwork(song);
     setFavoriteIds((ids) => [...ids, song.id]);
+  }
+
+  function changeEditorTab(tab: 'songs' | 'favorites' | 'trending') {
+    if (editorTab === 'favorites' && tab !== 'favorites' && pendingFavoriteRemovals.length) {
+      setFavoriteIds((ids) => ids.filter((id) => !pendingFavoriteRemovals.includes(id)));
+      setPendingFavoriteRemovals([]);
+    }
+    setEditorTab(tab);
   }
 
   function presentationPayload(): PptPayload {
@@ -892,9 +902,9 @@ export function WorshipApp() {
               </div>}
             </div>
             <div className="editor-tabs" role="group" aria-label="곡 라이브러리">
-              <button type="button" aria-pressed={editorTab === 'songs'} onClick={() => setEditorTab('songs')}>최근</button>
-              <button type="button" aria-pressed={editorTab === 'favorites'} onClick={() => setEditorTab('favorites')}>즐겨찾기</button>
-              <button type="button" aria-pressed={editorTab === 'trending'} onClick={() => setEditorTab('trending')}>트렌드</button>
+              <button type="button" aria-pressed={editorTab === 'songs'} onClick={() => changeEditorTab('songs')}>최근</button>
+              <button type="button" aria-pressed={editorTab === 'favorites'} onClick={() => changeEditorTab('favorites')}>즐겨찾기</button>
+              <button type="button" aria-pressed={editorTab === 'trending'} onClick={() => changeEditorTab('trending')}>트렌드</button>
             </div>
             <div className="editor-controls">
               {editorTab === 'songs' ? <div className="editor-control-group">
@@ -906,7 +916,7 @@ export function WorshipApp() {
                 {selected.length > 0 && <section ref={selectedQueueRef} className="editor-selected-queue" aria-labelledby="editor-selected-title"><div className="editor-heading"><h2 id="editor-selected-title">제작 목록</h2><span>{selected.length}곡</span></div><ol className="selected-list">{selected.map((song, index) => <li key={song.id}><span className="selected-index">{String(index + 1).padStart(2, '0')}</span><span className="selected-song"><strong>{song.title}</strong><small>{displayPerson(song.author)}</small></span><div className="selected-actions"><button type="button" onClick={() => moveSong(index, -1)} disabled={index === 0} aria-label={`${song.title} 위로`}>↑</button><button type="button" onClick={() => moveSong(index, 1)} disabled={index === selected.length - 1} aria-label={`${song.title} 아래로`}>↓</button><button type="button" onClick={() => { setRemovedSlideIndexes([]); setSelected((items) => items.filter((item) => item.id !== song.id)); }} aria-label={`${song.title} 제거`}>×</button></div></li>)}</ol></section>}
               </div> : editorTab === 'favorites' ? <div className="editor-control-group">
                 <div className="editor-heading"><h2>즐겨찾기</h2><span>{favoriteSongs.length}곡</span></div>
-                {loadingSongs ? <div className="editor-library-empty"><strong>곡 목록을 확인하고 있습니다</strong></div> : !libraryError && (favoriteSongs.length === 0 ? <div className="editor-library-empty"><strong>즐겨찾는 곡이 없습니다</strong><span>곡 검색 결과에서 별표를 눌러 추가하세요.</span></div> : <div className="editor-favorite-list">{favoriteSongs.map((song) => { const artwork = favoriteArtwork[song.id]; const videoId = youtubeVideos.find((video) => video.songId === song.id)?.videoId; const imageUrl = youtubeThumbnailUrl(videoId) || (artwork?.imageUrl || undefined); return <div className="recent-song-card favorite-artwork-row" key={song.id}>{imageUrl && <img className="recent-song-card__image" src={imageUrl} alt="" />}<span className="recent-song-card__glass favorite-artwork-glass"><button className="recent-song-card__title" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong></button><span className="recent-song-card__meta"><small>{song.category?.toUpperCase() === 'HYMN' && song.hymnNumber ? `새찬송가 ${song.hymnNumber}장` : displayKnown(song.artist) || '즐겨찾기 곡'}</small></span></span><button className="favorite-toggle is-favorite favorite-artwork-toggle" type="button" onClick={() => toggleFavorite(song)} aria-label={`${song.title} 즐겨찾기 해제`}>★</button></div>; })}</div>)}
+                {loadingSongs ? <div className="editor-library-empty"><strong>곡 목록을 확인하고 있습니다</strong></div> : !libraryError && (favoriteSongs.length === 0 ? <div className="editor-library-empty"><strong>즐겨찾는 곡이 없습니다</strong><span>곡 검색 결과에서 별표를 눌러 추가하세요.</span></div> : <div className="editor-favorite-list">{favoriteSongs.map((song) => { const artwork = favoriteArtwork[song.id]; const videoId = youtubeVideos.find((video) => video.songId === song.id)?.videoId; const imageUrl = youtubeThumbnailUrl(videoId) || (artwork?.imageUrl || undefined); const pending = pendingFavoriteRemovals.includes(song.id); return <div className="recent-song-card favorite-artwork-row" key={song.id}>{imageUrl && <img className="recent-song-card__image" src={imageUrl} alt="" />}<span className="recent-song-card__glass favorite-artwork-glass"><button className="recent-song-card__title" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong></button><span className="recent-song-card__meta"><small>{song.category?.toUpperCase() === 'HYMN' && song.hymnNumber ? `새찬송가 ${song.hymnNumber}장` : displayKnown(song.artist) || '즐겨찾기 곡'}</small></span></span><button className={`favorite-toggle favorite-artwork-toggle${pending ? '' : ' is-favorite'}`} type="button" onClick={() => toggleFavorite(song)} aria-label={pending ? `${song.title} 즐겨찾기 취소` : `${song.title} 즐겨찾기 해제`}>{pending ? '☆' : '★'}</button></div>; })}</div>)}
               </div> : null}
               <div className={`editor-control-group trend-panel${editorTab === 'trending' ? ' is-visible' : ' is-preloaded'}`} aria-hidden={editorTab !== 'trending'}>
                 <div className="editor-heading"><h2>찬양 곡</h2><span>{youtubeVideos.length}곡</span></div>
