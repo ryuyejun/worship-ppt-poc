@@ -330,7 +330,7 @@ footer.app-footer.closing { height: auto; min-height: 0; padding: 18px 40px 20px
 .editor-controls .song-meta { gap: 6px 10px; margin: 12px 0; }
 .editor-controls .song-meta div, .editor-controls .lyrics-preview > span { font-size: 11px; }
 .editor-controls .lyrics-preview { padding: 12px 0; }
-.editor-controls .lyrics-preview p { max-height: 118px; margin-top: 6px; font-size: 12px; line-height: 1.65; }
+.editor-controls .lyrics-preview p { max-height: 220px; overflow-y: auto; margin-top: 10px; font-size: 16px; line-height: 1.8; }
 .editor-controls .add-button { min-height: 38px; font-size: 13px; }
 .editor-library-empty { display: grid; gap: 5px; padding: 18px 2px; }
 .editor-library-empty strong { color: #31383d; font-size: 13px; font-weight: 550; }
