@@ -3,8 +3,8 @@ import type { Song } from './types';
 export type SlideTextPosition = { x: number; y: number; width: number; height: number };
 export type SlideStyle = { backgroundColor: string; textColor: string; fontFamily: string; fontSize: number; alignment: 'LEFT' | 'CENTER' | 'RIGHT'; linesPerSlide: number; bold: boolean; textX?: number; textY?: number; textWidth?: number; textHeight?: number; backgroundImageBase64?: string; backgroundImageType?: string };
 export type SlideSize = { width: number; height: number };
-export type PresentationInput = { slideSize?: SlideSize; songIds: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; extraSlides?: number; removedSlideIndexes?: number[]; slidePositions?: Record<number, SlideTextPosition>; slideTextOverrides?: Record<number, string>; pptxBase64?: string; style: SlideStyle };
-export type Slide = { title: string; lines: string[]; textPosition?: SlideTextPosition };
+export type PresentationInput = { slideSize?: SlideSize; songIds: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; extraSlides?: number; removedSlideIndexes?: number[]; slidePositions?: Record<number, SlideTextPosition>; slideTextOverrides?: Record<number, string>; slideTextColors?: Record<number, string>; pptxBase64?: string; style: SlideStyle };
+export type Slide = { title: string; lines: string[]; textPosition?: SlideTextPosition; textColor?: string };
 const lyricCache = new Map<number, Song>();
 
 function lyricLineWidth(text: string, fontSize: number): number {
@@ -100,7 +100,7 @@ export async function collectSlides(input: PresentationInput, signal?: AbortSign
     const width = Math.max(18, Math.min(90, longestLine * ((input.style.fontSize ?? 40) / 960) * 100 + 3));
     const aspect = (input.slideSize?.height ?? 720) / (input.slideSize?.width ?? 1280);
     const height = Math.max(12, Math.min(80, slide.lines.length * (input.style.fontSize / 960) * 120 / aspect + 3));
-    return { ...slide, lines: input.slideTextOverrides?.[index] !== undefined ? input.slideTextOverrides[index].split(/\r\n|\r|\n/) : slide.lines, textPosition: input.slidePositions?.[index] ?? { x: input.style.textX ?? 50, y: input.style.textY ?? 50, width: input.style.textWidth === 87.5 ? width : input.style.textWidth ?? width, height: input.style.textHeight === 55.6 ? height : input.style.textHeight ?? height } };
+    return { ...slide, lines: input.slideTextOverrides?.[index] !== undefined ? input.slideTextOverrides[index].split(/\r\n|\r|\n/) : slide.lines, textPosition: input.slidePositions?.[index] ?? { x: input.style.textX ?? 50, y: input.style.textY ?? 50, width: input.style.textWidth === 87.5 ? width : input.style.textWidth ?? width, height: input.style.textHeight === 55.6 ? height : input.style.textHeight ?? height }, textColor: input.slideTextColors?.[index] ?? input.style.textColor };
   });
 }
 
@@ -121,7 +121,7 @@ export async function makePresentation(slides: Slide[], style: SlideStyle, size 
     const textX = size.width * position.x / 100 - textWidth / 2;
     const textY = size.height * position.y / 100 - textHeight / 2;
     slide.addText(item.lines.join('\n'), { x: textX/96, y: textY/96, w: textWidth/96, h: textHeight/96,
-      fontFace: style.fontFamily, fontSize: style.fontSize, color: style.textColor.replace('#', ''),
+      fontFace: style.fontFamily, fontSize: style.fontSize, color: (item.textColor ?? style.textColor).replace('#', ''),
       bold: style.bold, align: alignment[style.alignment], valign: 'middle', margin: 0 });
   }
   const data = await ppt.write({ outputType: 'blob' });
