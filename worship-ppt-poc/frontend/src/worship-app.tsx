@@ -12,7 +12,7 @@ type PptStyle = {
   alignment: 'LEFT' | 'CENTER' | 'RIGHT'; linesPerSlide: number; bold: boolean;
 };
 type Preview = { imageBase64: string; slideIndex: number; slideCount: number };
-type PptPayload = { slideSize?: SlideSize; songIds: number[]; extraSlides?: number; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; pptxBase64?: string; style: PptStyle & { backgroundImageBase64?: string; backgroundImageType?: string } };
+type PptPayload = { slideSize?: SlideSize; songIds: number[]; extraSlides?: number; removedSlideIndexes?: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; pptxBase64?: string; style: PptStyle & { backgroundImageBase64?: string; backgroundImageType?: string } };
 
 const fontOptions = ['Apple SD Gothic Neo', '맑은 고딕 (Malgun Gothic)', 'Pretendard', 'Noto Sans KR', '나눔고딕 (NanumGothic)', 'Noto Serif KR'];
 
@@ -136,6 +136,7 @@ export function WorshipApp() {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewIndex, setPreviewIndex] = useState(0);
   const [extraSlideCount, setExtraSlideCount] = useState(0);
+  const [removedSlideIndexes, setRemovedSlideIndexes] = useState<number[]>([]);
   const [prepared, setPrepared] = useState<{ slides: Slide[]; style: SlideStyle; thumbnails: string[]; slideSize: SlideSize } | null>(null);
   const previewCache = useRef(new Map<number, string>());
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -294,6 +295,7 @@ export function WorshipApp() {
       slideSize,
       songIds: selected.map((song) => song.id),
       extraSlides: extraSlideCount,
+      removedSlideIndexes,
       externalSongs: selected.filter((song) => song.id < 0).map((song) => ({ id: song.id, title: song.title, artist: song.artist, lyrics: song.lyrics ?? '' })),
       ...(existingPptData ? { pptxBase64: existingPptData } : {}),
       style: { ...pptStyle, ...(backgroundImage ? { backgroundImageBase64: backgroundImage.dataUrl.split(',')[1], backgroundImageType: backgroundImage.type } : {}) },
@@ -331,7 +333,7 @@ export function WorshipApp() {
         previewCache.current.set(index, mainImage);
         setPreview({ imageBase64: mainImage, slideIndex: index, slideCount: slides.length });
         setPreviewIndex(index);
-        const thumbnails = await Promise.all(slides.map((slide) => renderSlide(slide, input.style, 320, size)));
+        const thumbnails = await Promise.all(slides.map((slide) => renderSlide(slide, input.style, 720, size)));
         if (controller.signal.aborted) return;
         setPrepared({ slides, style: input.style, thumbnails, slideSize: size });
       } catch (error) {
@@ -341,7 +343,7 @@ export function WorshipApp() {
       }
     }, 0);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [selected, pptStyle, backgroundImage, slideSize, existingPpt, existingPptData, existingPptError, validStyle, previewRetry, extraSlideCount]);
+  }, [selected, pptStyle, backgroundImage, slideSize, existingPpt, existingPptData, existingPptError, validStyle, previewRetry, extraSlideCount, removedSlideIndexes]);
 
   useEffect(() => {
     if (!prepared) return;
@@ -690,12 +692,12 @@ export function WorshipApp() {
           <section className="editor-workspace" aria-labelledby="preview-title">
             <div className="editor-toolbar"><label className="editor-document-title"><span className="visually-hidden">프레젠테이션 제목</span><input value={presentationTitle} onChange={(event) => setPresentationTitle(event.target.value)} maxLength={80} /><img src="/assets/figma/pencil.svg" alt="" /></label><div className="editor-size-control"><button className="editor-page-count" type="button" aria-label={`슬라이드 크기 ${slideSize.width} 곱하기 ${slideSize.height} 픽셀`} aria-expanded={sizeOpen} onClick={() => setSizeOpen((open) => !open)}><span>{slideSize.width}×{slideSize.height} px</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4.5 7.5 5.5 5 5.5-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button>{sizeOpen && <div className="editor-size-menu"><div className="editor-size-presets">{[{label:'16:9',width:1280,height:720},{label:'16:10',width:1280,height:800},{label:'4:3',width:1280,height:960},{label:'1:1',width:960,height:960}].map((preset) => <button type="button" key={preset.label} aria-pressed={slideSize.width===preset.width&&slideSize.height===preset.height} onClick={() => setSlideSize({width:preset.width,height:preset.height})}>{preset.label}</button>)}</div><div className="editor-size-custom"><label>가로<input type="number" min="320" max="3840" value={slideSize.width} onChange={(event) => setSlideSize((size) => ({...size,width:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label><span>×</span><label>세로<input type="number" min="320" max="3840" value={slideSize.height} onChange={(event) => setSlideSize((size) => ({...size,height:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label></div></div>}</div></div>
             <div className="editor-stage">
-              <div className={`editor-canvas ${preview && !previewLoading && !previewError ? 'has-preview' : ''}`} style={{aspectRatio:`${slideSize.width} / ${slideSize.height}`}} aria-live="polite">
-                {preview && !previewError ? <img src={`data:image/png;base64,${preview.imageBase64}`} alt={`${preview.slideIndex + 1}번째 슬라이드 미리보기`} /> : previewLoading ? <div className="editor-canvas-message"><span className="preview-spinner" aria-hidden="true" /><strong>슬라이드를 불러오는 중</strong></div> : previewError ? <div className="editor-canvas-message"><strong>미리보기를 열 수 없습니다</strong><span>{previewError}</span><button type="button" className="preview-retry" onClick={() => setPreviewRetry((value) => value + 1)}>다시 시도</button></div> : null}
-              </div>
+              {previewError ? <div className="editor-canvas-message"><strong>미리보기를 열 수 없습니다</strong><span>{previewError}</span><button type="button" className="preview-retry" onClick={() => setPreviewRetry((value) => value + 1)}>다시 시도</button></div> : previewLoading && !prepared ? <div className="editor-canvas-message"><span className="preview-spinner" aria-hidden="true" /><strong>슬라이드를 불러오는 중</strong></div> : <div className="editor-page-stack" onScroll={(event) => { const cards = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[data-slide-index]')); const middle = event.currentTarget.getBoundingClientRect().top + event.currentTarget.clientHeight / 2; const nearest = cards.reduce((best, card) => Math.abs(card.getBoundingClientRect().top + card.offsetHeight / 2 - middle) < Math.abs(best.getBoundingClientRect().top + best.offsetHeight / 2 - middle) ? card : best, cards[0]); if (nearest) setPreviewIndex(Number(nearest.dataset.slideIndex)); }}>
+                {(prepared?.thumbnails ?? []).map((thumbnail, slide) => <div className={`editor-page-sheet ${previewIndex === slide ? 'is-current' : ''}`} data-slide-index={slide} key={slide} style={{aspectRatio:`${slideSize.width} / ${slideSize.height}`}}><img src={`data:image/png;base64,${thumbnail}`} alt={`${slide + 1}번째 슬라이드 미리보기`} /><span className="editor-page-label">{slide + 1} 페이지</span><button className="editor-page-delete" type="button" aria-label={`${slide + 1}페이지 삭제`} onClick={() => { let original = 0; let visible = 0; while (visible < slide) { if (!removedSlideIndexes.includes(original)) visible += 1; original += 1; } while (removedSlideIndexes.includes(original)) original += 1; setRemovedSlideIndexes((indexes) => [...indexes, original]); setPreviewIndex(Math.max(0, slide - 1)); }}>×</button></div>)}
+              </div>}
             </div>
             <div className="editor-filmstrip" aria-label="슬라이드 페이지">
-              {Array.from({ length: preview?.slideCount ?? 0 }, (_, slide) => <button className={`filmstrip-page ${preview?.slideIndex === slide ? 'is-active' : ''}`} type="button" key={slide} onClick={() => setPreviewIndex(slide)} disabled={!preview} aria-label={`${slide + 1}번 슬라이드 미리보기`} aria-current={preview?.slideIndex === slide ? 'page' : undefined}><span className="filmstrip-canvas">{prepared?.thumbnails[slide] && <img src={`data:image/png;base64,${prepared.thumbnails[slide]}`} alt="" />}</span><span className="filmstrip-number">{slide + 1}</span></button>)}
+              {Array.from({ length: preview?.slideCount ?? 0 }, (_, slide) => <button className={`filmstrip-page ${preview?.slideIndex === slide ? 'is-active' : ''}`} type="button" key={slide} onClick={() => { setPreviewIndex(slide); document.querySelector<HTMLElement>(`[data-slide-index="${slide}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }} disabled={!preview} aria-label={`${slide + 1}번 슬라이드 미리보기`} aria-current={preview?.slideIndex === slide ? 'page' : undefined}><span className="filmstrip-canvas">{prepared?.thumbnails[slide] && <img src={`data:image/png;base64,${prepared.thumbnails[slide]}`} alt="" />}</span><span className="filmstrip-number">{slide + 1}</span></button>)}
               <button className="filmstrip-add" type="button" onClick={() => { const nextIndex = preview?.slideCount ?? 1; setExtraSlideCount((count) => count + 1); setPreviewIndex(nextIndex); }} aria-label="페이지 추가"><span aria-hidden="true">＋</span><small>페이지 추가</small></button>
             </div>
           </section>

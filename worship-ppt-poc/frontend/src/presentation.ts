@@ -2,7 +2,7 @@ import type { Song } from './types';
 
 export type SlideStyle = { backgroundColor: string; textColor: string; fontFamily: string; fontSize: number; alignment: 'LEFT' | 'CENTER' | 'RIGHT'; linesPerSlide: number; bold: boolean; backgroundImageBase64?: string; backgroundImageType?: string };
 export type SlideSize = { width: number; height: number };
-export type PresentationInput = { slideSize?: SlideSize; songIds: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; extraSlides?: number; pptxBase64?: string; style: SlideStyle };
+export type PresentationInput = { slideSize?: SlideSize; songIds: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; extraSlides?: number; removedSlideIndexes?: number[]; pptxBase64?: string; style: SlideStyle };
 export type Slide = { title: string; lines: string[] };
 const lyricCache = new Map<number, Song>();
 
@@ -40,7 +40,9 @@ export async function collectSlides(input: PresentationInput, signal?: AbortSign
   const extraSlides = Math.max(0, Math.min(100, Math.floor(input.extraSlides ?? 0)));
   if (!slides.length) slides.push({ title: '', lines: [] });
   slides.push(...Array.from({ length: extraSlides }, () => ({ title: '', lines: [] })));
-  return slides;
+  const removed = new Set((input.removedSlideIndexes ?? []).filter(index => Number.isInteger(index) && index >= 0));
+  const visibleSlides = slides.filter((_, index) => !removed.has(index));
+  return visibleSlides.length ? visibleSlides : [{ title: '', lines: [] }];
 }
 
 export async function makePresentation(slides: Slide[], style: SlideStyle, size = {width:1280,height:720}): Promise<Blob> {
