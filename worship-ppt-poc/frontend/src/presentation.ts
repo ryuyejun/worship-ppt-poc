@@ -44,7 +44,13 @@ export async function collectSlides(input: PresentationInput, signal?: AbortSign
   const removed = new Set((input.removedSlideIndexes ?? []).filter(index => Number.isInteger(index) && index >= 0));
   const visibleSlides = slides.filter((_, index) => !removed.has(index));
   const result = visibleSlides.length ? visibleSlides : [{ title: '', lines: [] }];
-  return result.map((slide, index) => ({ ...slide, textPosition: input.slidePositions?.[index] }));
+  return result.map((slide, index) => {
+    const longestLine = Math.max(1, ...slide.lines.map(line => [...line].length));
+    const width = Math.max(18, Math.min(90, longestLine * ((input.style.fontSize ?? 40) / 960) * 100 + 3));
+    const aspect = (input.slideSize?.height ?? 720) / (input.slideSize?.width ?? 1280);
+    const height = Math.max(12, Math.min(80, slide.lines.length * (input.style.fontSize / 960) * 120 / aspect + 3));
+    return { ...slide, textPosition: input.slidePositions?.[index] ?? { x: input.style.textX ?? 50, y: input.style.textY ?? 50, width: input.style.textWidth === 87.5 ? width : input.style.textWidth ?? width, height: input.style.textHeight === 55.6 ? height : input.style.textHeight ?? height } };
+  });
 }
 
 export async function makePresentation(slides: Slide[], style: SlideStyle, size = {width:1280,height:720}): Promise<Blob> {
