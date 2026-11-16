@@ -6,7 +6,7 @@ import { matchSongVideos } from './song-video-match.mjs';
 const json = (body, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
 const fail = (message, status) => json({ success: false, data: null, error: message }, status);
 const ok = data => json({ success: true, data, error: null });
-const routes = new Set(['/songs', '/ppt-songs', '/search', '/song', '/song-lyrics', '/requests', '/providers/search', '/song-artwork/search', '/youtube-videos']);
+const routes = new Set(['/songs', '/ppt-songs', '/search', '/song', '/song-lyrics', '/requests', '/providers/search', '/song-artwork/search', '/youtube-videos', '/youtube-thumbnail/search']);
 
 async function getTrendingSongs(db) {
   const { results: videos } = await db.prepare(`SELECT v.video_id AS videoId, v.video_title AS videoTitle, s.view_count AS views, s.like_count AS likes, s.fetched_at AS fetchedAt
@@ -241,6 +241,32 @@ export default {
       try { input = text ? JSON.parse(text) : {}; } catch { return fail('요청 형식을 확인해 주세요.', 400); }
       if (path === '/songs') return ok(await listSongs(env.DB, false));
       if (path === '/youtube-videos') return ok(await getTrendingSongs(env.DB));
+      if (path === '/youtube-thumbnail/search') {
+        const songId = input?.songId;
+        const title = typeof input?.title === 'string' ? input.title.normalize('NFC').trim().slice(0, 100) : '';
+        if (!Number.isSafeInteger(songId) || songId === 0 || !title) return fail('곡 정보를 확인해 주세요.', 400);
+        const cached = songId > 0 ? await env.DB.prepare('SELECT song_title AS title, video_id AS videoId, fetched_at AS fetchedAt FROM youtube_song_thumbnails WHERE song_id = ?').bind(songId).first() : null;
+        if (cached?.title === title && Date.now() - Date.parse(cached.fetchedAt) < 7 * 24 * 60 * 60 * 1000) {
+          return ok({ videoId: cached.videoId, imageUrl: cached.videoId ? `/youtube-thumbnail/${cached.videoId}` : null });
+        }
+        if (!env.YOUTUBE_API_KEY) return ok({ videoId: null, imageUrl: null });
+        const search = new URL('https://www.googleapis.com/youtube/v3/search');
+        search.search = new URLSearchParams({ part: 'snippet', q: `${title} 찬양`, type: 'video', maxResults: '5', relevanceLanguage: 'ko', regionCode: 'KR', key: env.YOUTUBE_API_KEY }).toString();
+        const found = await fetch(search, { signal: AbortSignal.timeout(8000) });
+        if (!found.ok) return ok({ videoId: null, imageUrl: null });
+        const payload = await found.json();
+        const normalize = value => String(value || '').normalize('NFC').toLocaleLowerCase('ko-KR').replace(/[^\p{L}\p{N}]/gu, '');
+        const wanted = normalize(title);
+        const candidate = (Array.isArray(payload.items) ? payload.items : []).find(item => {
+          const candidateTitle = normalize(item?.snippet?.title);
+          return candidateTitle.length > 0 && (candidateTitle.includes(wanted) || wanted.includes(candidateTitle));
+        });
+        const videoId = /^[A-Za-z0-9_-]{11}$/.test(candidate?.id?.videoId || '') ? candidate.id.videoId : null;
+        if (songId > 0) await env.DB.prepare(`INSERT INTO youtube_song_thumbnails(song_id,song_title,video_id,fetched_at) VALUES(?,?,?,?)
+          ON CONFLICT(song_id) DO UPDATE SET song_title=excluded.song_title,video_id=excluded.video_id,fetched_at=excluded.fetched_at`)
+          .bind(songId, title, videoId, new Date().toISOString()).run();
+        return ok({ videoId, imageUrl: videoId ? `/youtube-thumbnail/${videoId}` : null });
+      }
       if (path === '/ppt-songs') return ok(await listSongs(env.DB, true));
       if (path === '/search') {
         const songs = await searchSongs(env.DB, input?.title);
