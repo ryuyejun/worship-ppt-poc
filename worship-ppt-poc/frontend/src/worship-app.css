@@ -354,6 +354,7 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
 .editor-page-sheet.is-snap-x::before { top: 0; bottom: 0; left: 50%; width: 1px; }
 .editor-page-sheet.is-snap-y::after { top: 50%; right: 0; left: 0; height: 1px; }
 .editor-slide-text { position: absolute; z-index: 1; display: flex; align-items: center; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; cursor: text; }
+.editor-slide-textarea { width: 100%; height: 100%; resize: none; border: 0; outline: 0; background: transparent; padding: 0; color: inherit; font: inherit; line-height: inherit; text-align: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
 .text-box-selection { position: absolute; z-index: 2; border: 2px solid #21c5d4; pointer-events: none; }
 .text-box-handle { position: absolute; display: block; width: 13px; height: 13px; border: 2px solid #21c5d4; border-radius: 50%; background: #fff; }
 .text-box-handle { pointer-events: auto; }
