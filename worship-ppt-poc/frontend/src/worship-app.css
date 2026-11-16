@@ -434,6 +434,12 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
 .filmstrip-add:hover { border-color: #4ca9d8; background: #fff; color: #237eac; }
 .filmstrip-add:focus-visible { outline: 2px solid #2383bb; outline-offset: 2px; }
 .editor-inspector { border-left: 0; }
+.inspector-heading { display: flex; min-height: 70px; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid rgba(0,0,0,.12); padding: 12px 14px; cursor: grab; touch-action: none; user-select: none; }
+.inspector-heading:active { cursor: grabbing; }
+.inspector-heading .editor-kicker { margin: 0 0 2px; color: #626a6e; font-size: 12px; }
+.inspector-heading h2 { margin: 0; color: #252b30; font-size: 16px; font-weight: 650; }
+.editor-count { flex: 0 0 auto; color: #20364c; font-size: 20px; font-variant-numeric: tabular-nums; }
+.inspector-dock-grip { flex: 0 0 auto; color: #73808b; font-size: 18px; line-height: 1; }
 .inspector-controls { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px; }
 .inspector-controls > .style-field { margin-bottom: 20px; }
 .inspector-controls .style-field { gap: 6px; font-size: 12px; }
