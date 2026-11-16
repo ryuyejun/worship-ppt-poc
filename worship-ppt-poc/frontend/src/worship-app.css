@@ -527,8 +527,8 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
 .image-drop-zone { border: 1px dashed rgba(23,49,73,.2); border-radius: 8px; background: rgba(255,255,255,.28); padding: 10px; transition: border-color 160ms ease, background-color 160ms ease; }
 .image-drop-zone.is-drag-over { border-color: #2582b8; background: rgba(224,243,255,.72); }
 .image-drop-zone .file-field > span.file-picker-button { margin-bottom: 2px; }
-.auth-screen { display:grid; min-height:100vh; place-items:center; background:#e9edf2; padding:clamp(20px,5vw,64px); }
-.auth-card { position:relative; width:min(100%,1180px); min-height:640px; overflow:hidden; border:1px solid rgba(255,255,255,.78); border-radius:22px; background:#f0f1f5; box-shadow:0 24px 60px rgba(23,49,73,.16); }
+.auth-screen { display:grid; min-height:100vh; min-height:100svh; place-items:center; background:#e9edf2; padding:clamp(20px,3.3vw,54px); }
+.auth-card { position:relative; width:min(100%,1536px); min-height:min(960px,calc(100vh - 104px)); min-height:min(960px,calc(100svh - 104px)); overflow:hidden; border:1px solid rgba(255,255,255,.78); border-radius:24px; background:#f0f1f5; box-shadow:0 24px 60px rgba(23,49,73,.16); }
 .auth-main,.auth-promo { position:absolute; inset-block:0; width:50%; transition:transform 620ms cubic-bezier(.2,.8,.2,1); }
 .auth-main { left:0; z-index:2; display:grid; align-content:center; padding:clamp(32px,5vw,84px); }
 .auth-card.is-signup .auth-main { transform:translateX(100%); }
