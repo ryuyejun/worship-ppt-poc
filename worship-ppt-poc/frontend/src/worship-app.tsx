@@ -106,6 +106,7 @@ export function WorshipApp() {
   const [results, setResults] = useState<Song[]>([]);
   const [selected, setSelected] = useState<Song[]>([]);
   const [activeSong, setActiveSong] = useState<Song | null>(null);
+  const [showLyricsTab, setShowLyricsTab] = useState(false);
   const [lyricsLoadingSongId, setLyricsLoadingSongId] = useState<number | null>(null);
   const [lyricsLoadError, setLyricsLoadError] = useState<{ songId: number; message: string } | null>(null);
   const [searchNotice, setSearchNotice] = useState<Notice>(null);
@@ -187,6 +188,14 @@ export function WorshipApp() {
 
   const validStyle = Boolean(pptStyle.fontFamily.trim()) && pptStyle.fontFamily.length <= 80 && Number.isInteger(pptStyle.fontSize) && pptStyle.fontSize >= 16 && pptStyle.fontSize <= 100 && Number.isInteger(pptStyle.linesPerSlide) && pptStyle.linesPerSlide >= 1 && pptStyle.linesPerSlide <= 6;
   const favoriteSongs = readySongs.filter((song) => favoriteIds.includes(song.id));
+  useEffect(() => {
+    if (activeSong) {
+      setShowLyricsTab(true);
+      return;
+    }
+    const timeout = window.setTimeout(() => setShowLyricsTab(false), 280);
+    return () => window.clearTimeout(timeout);
+  }, [activeSong]);
   useEffect(() => {
     let cancelled = false;
     api<typeof youtubeVideos>('/youtube-videos').then(({ data }) => { if (!cancelled) { setYoutubeVideos(data); setYoutubeStatus('ready'); } }).catch(() => { if (!cancelled) setYoutubeStatus('error'); });
@@ -906,7 +915,7 @@ export function WorshipApp() {
               <button type="button" aria-pressed={editorTab === 'songs'} onClick={() => changeEditorTab('songs')}>최근</button>
               <button type="button" aria-pressed={editorTab === 'favorites'} onClick={() => changeEditorTab('favorites')}>즐겨찾기</button>
               <button type="button" aria-pressed={editorTab === 'trending'} onClick={() => changeEditorTab('trending')}>트렌드</button>
-              {activeSong && <button className="editor-tab--lyrics" type="button" aria-pressed={editorTab === 'lyrics'} onClick={() => changeEditorTab('lyrics')}>가사</button>}
+              {showLyricsTab && <button className={`editor-tab--lyrics${activeSong ? '' : ' is-leaving'}`} type="button" aria-pressed={editorTab === 'lyrics'} onClick={() => changeEditorTab('lyrics')}>가사</button>}
             </div>
             <div className="editor-controls">
               {editorTab === 'songs' || editorTab === 'lyrics' ? <div className="editor-control-group">
