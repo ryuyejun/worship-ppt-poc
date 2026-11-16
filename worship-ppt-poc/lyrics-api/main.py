@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import hmac
+import json
 import os
 import unicodedata
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Generator
@@ -68,6 +72,50 @@ def normalize(value: str) -> str:
     return "".join(unicodedata.normalize("NFC", value).casefold().split())
 
 
+def find_youtube_candidates(artist: str, title: str) -> list[dict[str, str]]:
+    api_key = os.getenv("YOUTUBE_API_KEY")
+    if not api_key:
+        return []
+
+    parameters = urllib.parse.urlencode(
+        {
+            "part": "snippet",
+            "q": f"{artist} {title} 가사",
+            "type": "video",
+            "maxResults": 3,
+            "relevanceLanguage": "ko",
+            "regionCode": "KR",
+            "key": api_key,
+        }
+    )
+    request = urllib.request.Request(
+        f"https://www.googleapis.com/youtube/v3/search?{parameters}",
+        headers={"Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=6) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        return []
+
+    candidates: list[dict[str, str]] = []
+    for item in payload.get("items", []):
+        video_id = item.get("id", {}).get("videoId")
+        snippet = item.get("snippet", {})
+        if not video_id:
+            continue
+        candidates.append(
+            {
+                "video_id": video_id,
+                "title": snippet.get("title", ""),
+                "channel": snippet.get("channelTitle", ""),
+                "url": f"https://www.youtube.com/watch?v={video_id}",
+                "source": "YouTube",
+            }
+        )
+    return candidates
+
+
 def get_session() -> Generator[Session, None, None]:
     with SessionFactory() as session:
         yield session
@@ -92,13 +140,43 @@ def get_lyrics(
     title: str = Query(min_length=1, max_length=255),
     session: Session = Depends(get_session),
 ) -> LyricsResponse:
-    statement = select(Lyric).where(
-        Lyric.normalized_artist == normalize(artist),
-        Lyric.normalized_title == normalize(title),
+    normalized_artist = normalize(artist)
+    normalized_title = normalize(title)
+    matches = list(
+        session.scalars(
+            select(Lyric)
+            .where(Lyric.normalized_title.contains(normalized_title))
+            .order_by(Lyric.id)
+        ).all()
     )
-    lyric = session.scalar(statement)
+    lyric = next(
+        (
+            item
+            for item in matches
+            if item.normalized_title == normalized_title
+            and item.normalized_artist == normalized_artist
+        ),
+        None,
+    )
+    if lyric is None and len(matches) == 1:
+        lyric = matches[0]
+    if lyric is None and len(matches) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "제목이 비슷한 곡이 여러 개 있습니다. 가수와 제목을 확인해 주세요.",
+                "matches": [{"artist": item.artist, "title": item.title} for item in matches[:10]],
+            },
+        )
     if lyric is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="로컬 DB에서 가사를 찾을 수 없습니다.")
+        candidates = find_youtube_candidates(artist, title)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "message": "로컬 DB에서 가사를 찾을 수 없습니다. YouTube에서 영상 후보를 확인해 주세요.",
+                "youtube_candidates": candidates,
+            },
+        )
     return LyricsResponse(
         id=lyric.id,
         artist=lyric.artist,

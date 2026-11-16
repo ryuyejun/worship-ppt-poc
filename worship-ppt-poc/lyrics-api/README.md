@@ -1,6 +1,6 @@
 # Yebit Lyrics API
 
-로컬 SQLite의 승인된 가사를 검색하고 등록하는 FastAPI 서비스입니다. Genius 및 `syncedlyrics` 자동 수집은 연결하지 않습니다. 해당 라이브러리의 가사 취득 경로에는 페이지 스크래핑 또는 제공처별 비공식 수집이 포함될 수 있으므로, 이를 통해 가져온 전문을 자동 저장하지 않습니다.
+로컬 SQLite의 승인된 가사를 검색하고 등록하는 FastAPI 서비스입니다. 로컬 가사 검색에서 결과가 없고 `YOUTUBE_API_KEY`가 설정된 경우, 공식 YouTube Data API v3로 영상 후보만 검색합니다. 영상 설명의 가사를 추출하거나 자동 저장하지 않습니다.
 
 ## 실행
 
@@ -14,9 +14,11 @@ uvicorn main:app --reload --port 8001
 
 기본 DB 파일은 `lyrics-api/data/lyrics.sqlite3`입니다. 다른 위치는 `LYRICS_DATA_DIRECTORY`로 지정할 수 있습니다. `LYRICS_DATABASE_URL`을 지정하는 경우에도 SQLite URL만 허용합니다.
 
+YouTube 후보 검색을 사용하려면 서버 프로세스에 `YOUTUBE_API_KEY` 환경변수를 설정합니다. 키를 코드나 프론트엔드에 넣지 마세요.
+
 ## API
 
-- `GET /lyrics?artist=WELOVE&title=곡제목`: 가수와 제목이 정규화되어 정확히 일치하는 로컬 가사를 조회합니다. 없으면 404를 반환합니다.
+- `GET /lyrics?artist=WELOVE&title=곡제목`: 먼저 제목 부분 일치로 로컬 가사를 검색하고, 결과가 있으면 즉시 반환합니다. 없으면 `https://www.googleapis.com/youtube/v3/search`로 `"{artist} {title} 가사"`를 검색해 최대 3개의 영상 제목, 채널명, 링크를 404 응답의 `youtube_candidates`로 반환합니다. `YOUTUBE_API_KEY`가 없거나 조회에 실패하면 후보 목록은 비어 있습니다.
 - `POST /lyrics`: 권한을 확인한 가사를 등록합니다. 서버에서 `LYRICS_IMPORT_TOKEN`을 설정하고 요청에 같은 `X-Import-Token` 헤더를 보내야 합니다. 가수·제목 조합이 중복되면 기존 가사를 덮어쓰지 않고 409를 반환합니다.
 - `GET /health`: 서비스 상태를 확인합니다.
 - `GET /docs`: 대화형 API 문서입니다.
@@ -33,4 +35,6 @@ uvicorn main:app --reload --port 8001
 }
 ```
 
-이 API는 현재 Cloudflare Worker/D1 웹 앱과 아직 연결되지 않았습니다. FastAPI는 Cloudflare Workers에서 직접 실행할 수 없으므로, 웹 앱과 연결하려면 Python 서비스를 실행할 별도 호스트와 HTTPS 주소가 필요합니다. Genius/syncedlyrics 검색이나 외부 가사 자동 저장은 별도 제공처의 허용된 API와 저장 조건이 확인되기 전에는 비활성 상태입니다.
+YouTube 검색 후보는 조회 시점에만 가져오며 SQLite에 저장하지 않습니다. YouTube API 정책은 API 데이터의 장기 저장을 제한하고, API를 이용해 저작권 침해 자료를 유통하는 행위를 금지합니다. [YouTube API 데이터 저장 정책](https://developers.google.com/youtube/terms/developer-policies#e.-handling-youtube-data-and-content)
+
+이 API는 현재 Cloudflare Worker/D1 웹 앱과 아직 연결되지 않았습니다. FastAPI는 Cloudflare Workers에서 직접 실행할 수 없으므로, 웹 앱과 연결하려면 Python 서비스를 실행할 별도 호스트와 HTTPS 주소가 필요합니다. Genius/syncedlyrics 가사 자동 수집은 제공처의 허용된 사용 및 저장 조건이 확인되기 전까지 비활성 상태입니다.
