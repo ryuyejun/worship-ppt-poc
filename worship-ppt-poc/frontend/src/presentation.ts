@@ -7,13 +7,54 @@ export type PresentationInput = { slideSize?: SlideSize; songIds: number[]; exte
 export type Slide = { title: string; lines: string[]; textPosition?: SlideTextPosition };
 const lyricCache = new Map<number, Song>();
 
-export function splitLyrics(lyrics: string, perSlide: number): string[][] {
+function lyricLineWidth(text: string, fontSize: number): number {
+  let units = 0;
+  for (const char of text) {
+    if (/\s/u.test(char)) units += 0.32;
+    else if (/[\u1100-\u11ff\u2e80-\u9fff\uac00-\ud7af\uff01-\uff60]/u.test(char)) units += 1;
+    else if (/[MW@#%&]/i.test(char)) units += 0.82;
+    else if (/[il.,'`!:;|]/i.test(char)) units += 0.3;
+    else units += 0.56;
+  }
+  return units * (fontSize * 96 / 72);
+}
+
+function wrapLyricLine(line: string, maxWidth: number, fontSize: number): string[] {
+  const words = line.trim().split(/\s+/u).filter(Boolean);
+  if (!words.length) return [];
+  const wrapped: string[] = [];
+  let current = '';
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (current && lyricLineWidth(candidate, fontSize) > maxWidth) {
+      wrapped.push(current);
+      current = '';
+    }
+    if (lyricLineWidth(word, fontSize) <= maxWidth) {
+      current = current ? `${current} ${word}` : word;
+      continue;
+    }
+    for (const char of word) {
+      const part = current ? `${current}${char}` : char;
+      if (current && lyricLineWidth(part, fontSize) > maxWidth) {
+        wrapped.push(current);
+        current = char;
+      } else current = part;
+    }
+  }
+  if (current) wrapped.push(current);
+  return wrapped;
+}
+
+export function splitLyrics(lyrics: string, perSlide: number, layout?: { width: number; fontSize: number; maxTextWidth: number }): string[][] {
   if (!lyrics.trim()) throw new Error('가사가 없습니다.');
   if (!Number.isInteger(perSlide) || perSlide < 1 || perSlide > 6) throw new Error('한 장의 줄 수는 1~6이어야 합니다.');
   const slides: string[][] = []; let section: string[] = [];
   const flush = () => { for (let i = 0; i < section.length; i += perSlide) slides.push(section.slice(i, i + perSlide)); section = []; };
   for (const line of lyrics.split(/\r\n|\r|\n/)) {
-    if (!line.trim() || /^\[[^\[\]\r\n]{1,40}\]$/.test(line.trim())) flush(); else section.push(line);
+    if (!line.trim() || /^\[[^\[\]\r\n]{1,40}\]$/.test(line.trim())) flush();
+    else if (layout) section.push(...wrapLyricLine(line, layout.width * layout.maxTextWidth / 100, layout.fontSize));
+    else section.push(line);
   }
   flush();
   return slides;
@@ -37,7 +78,17 @@ export async function collectSlides(input: PresentationInput, signal?: AbortSign
     if (!song.lyrics?.trim()) throw new Error('선택한 곡에 가사가 없습니다.');
     return { id, title: song.title, artist: song.artist, lyrics: song.lyrics };
   }));
-  const slides = songs.flatMap(song => splitLyrics(song.lyrics, input.style.linesPerSlide).map(lines => ({ title: song.title, lines })));
+  const layout = {
+    width: input.slideSize?.width ?? 1280,
+    fontSize: input.style.fontSize,
+    maxTextWidth: Math.min(90, input.style.textWidth ?? 87.5),
+  };
+  const slideHeight = input.slideSize?.height ?? 720;
+  const maxTextHeight = input.style.textHeight && input.style.textHeight !== 55.6 ? input.style.textHeight : 80;
+  const lineHeight = input.style.fontSize * 96 / 72 * 1.2;
+  const fittingLines = Math.max(1, Math.floor(slideHeight * maxTextHeight / 100 / lineHeight));
+  const safeLinesPerSlide = Math.min(input.style.linesPerSlide, fittingLines);
+  const slides = songs.flatMap(song => splitLyrics(song.lyrics, safeLinesPerSlide, layout).map(lines => ({ title: song.title, lines })));
   const extraSlides = Math.max(0, Math.min(100, Math.floor(input.extraSlides ?? 0)));
   if (!slides.length) slides.push({ title: '', lines: [] });
   slides.push(...Array.from({ length: extraSlides }, () => ({ title: '', lines: [] })));
