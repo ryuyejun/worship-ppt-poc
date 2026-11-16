@@ -45,7 +45,7 @@ async function readInput(request) {
 }
 
 function extractLyrics(description) {
-  const metadata = /https?:\/\/|www\.|#\w+|구독|subscribe|instagram|facebook|twitter|문의|비즈니스|저작권|copyright|작사|작곡|편곡|제공|출처|후원|donat|contact|credit|앨범 소개|수록곡|lyrics by|music by|guitar|bass|drum|cello|videographer|photograph|color.?graded|video.?edit|engineer|lighting|vocal|mixed|mastered|arrange|location|special thanks|recorded|camera|director|producer|production|피아워십|워십팀|세션|촬영|편집|녹화|음향|조명|마스터링|믹싱|연주|출연/i;
+  const metadata = /https?:\/\/|www\.|#\w+|구독|subscribe|instagram|facebook|twitter|문의|비즈니스|저작권|copyright|작사|작곡|편곡|제공|출처|후원|donat|contact|credit|앨범 소개|수록곡|lyrics by|music by|guitar|bass|drum|cello|videographer|photograph|color.?graded|video.?edit|engineer|lighting|vocal|mixed|mastered|arrange|location|special thanks|recorded|camera|director|producer|production|피아워십|워십팀|세션|촬영|편집|녹화|음향|조명|마스터링|믹싱|연주|출연|음악\s*자막\s*제작|자막\s*제작|본\s*영상은|수익\s*창출|수익\s*기능|사용하지\s*않았|수익을\s*창출|본\s*영상|영상\s*제작|이용해\s*주셔서|시청해\s*주셔서/i;
   const blocks = [];
   let current = [];
   for (const rawLine of String(description || '').replace(/\r\n?/g, '\n').split('\n')) {
