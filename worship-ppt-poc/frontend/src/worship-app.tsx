@@ -91,6 +91,7 @@ export function WorshipApp() {
   const [page, setPage] = useState<'create' | 'manage'>(window.location.hash === '#manage' ? 'manage' : 'create');
   const [navOpen, setNavOpen] = useState(false);
   const [inspectorDock, setInspectorDock] = useState<'left' | 'right'>(() => localStorage.getItem('yebit-inspector-dock') === 'left' ? 'left' : 'right');
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(() => localStorage.getItem('yebit-inspector-collapsed') === 'true');
   const [inspectorWidth, setInspectorWidth] = useState(() => {
     const savedWidth = Number(localStorage.getItem('yebit-inspector-width'));
     return Number.isFinite(savedWidth) && savedWidth >= 240 && savedWidth <= 520 ? savedWidth : 300;
@@ -110,6 +111,7 @@ export function WorshipApp() {
 
   useEffect(() => { localStorage.setItem('yebit-inspector-width', String(inspectorWidth)); }, [inspectorWidth]);
   useEffect(() => { localStorage.setItem('yebit-inspector-dock', inspectorDock); }, [inspectorDock]);
+  useEffect(() => { localStorage.setItem('yebit-inspector-collapsed', String(inspectorCollapsed)); }, [inspectorCollapsed]);
 
   function startInspectorResize(event: ReactPointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
@@ -958,7 +960,7 @@ export function WorshipApp() {
       </header>}
 
       {page === 'create' ? (
-        <main className={`editor-page${inspectorDock === 'left' ? ' is-inspector-left' : ''}`} id="create" style={{ '--inspector-width': `${inspectorWidth}px` } as CSSProperties} onPointerDownCapture={(event) => { const target = event.target; if (target instanceof Element && target.closest('.editor-slide-text, .text-box-handle, .inspector-resize-handle')) return; setSelectedTextSlide(null); }}>
+        <main className={`editor-page${inspectorDock === 'left' ? ' is-inspector-left' : ''}${inspectorCollapsed ? ' is-inspector-collapsed' : ''}`} id="create" style={{ '--inspector-width': `${inspectorWidth}px` } as CSSProperties} onPointerDownCapture={(event) => { const target = event.target; if (target instanceof Element && target.closest('.editor-slide-text, .text-box-handle, .inspector-resize-handle')) return; setSelectedTextSlide(null); }}>
           <aside className="editor-sidebar" aria-label="찬양 곡 선택">
             <a className="editor-brand" href="#create" aria-label="Yebit 찬양 PPT 제작">
               <img src="/assets/figma/editor-logo.png" width="42" height="42" alt="" />
@@ -1028,9 +1030,9 @@ export function WorshipApp() {
               <button className="filmstrip-add" type="button" onClick={() => { const nextIndex = preview?.slideCount ?? 1; setExtraSlideCount((count) => count + 1); setPreviewIndex(nextIndex); }} aria-label="페이지 추가"><span aria-hidden="true">＋</span><small>페이지 추가</small></button>
             </div>
           </section>
-          <aside className="editor-inspector" aria-label="슬라이드 편집">
+          {!inspectorCollapsed && <aside className="editor-inspector" aria-label="슬라이드 편집">
             <div className={`inspector-resize-handle is-${inspectorDock}`} role="separator" aria-orientation="vertical" aria-label="편집 도구 너비 조절" aria-valuemin={240} aria-valuemax={520} aria-valuenow={Math.round(inspectorWidth)} tabIndex={0} onPointerDown={startInspectorResize} onPointerMove={resizeInspector} onPointerUp={stopInspectorResize} onPointerCancel={stopInspectorResize} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); const direction = event.key === 'ArrowRight' ? 1 : -1; setInspectorWidth((width) => Math.max(240, Math.min(520, width + direction * (event.shiftKey ? 32 : 12)))); } }} />
-            <div className="inspector-heading"><div><p className="editor-kicker">편집 도구</p><h2>슬라이드 디자인</h2></div><span className="editor-count">{preview ? `${preview.slideIndex + 1} / ${preview.slideCount}` : '—'}</span><button className="inspector-dock-toggle" type="button" onClick={() => setInspectorDock((dock) => dock === 'right' ? 'left' : 'right')} aria-label={inspectorDock === 'right' ? '편집 도구를 왼쪽에 배치' : '편집 도구를 오른쪽에 배치'} title={inspectorDock === 'right' ? '왼쪽 벽에 배치' : '오른쪽 벽에 배치'}>{inspectorDock === 'right' ? '⇤' : '⇥'}</button></div>
+            <div className="inspector-heading"><div><p className="editor-kicker">편집 도구</p><h2>슬라이드 디자인</h2></div><span className="editor-count">{preview ? `${preview.slideIndex + 1} / ${preview.slideCount}` : '—'}</span><button className="inspector-dock-toggle" type="button" onClick={() => setInspectorDock((dock) => dock === 'right' ? 'left' : 'right')} aria-label={inspectorDock === 'right' ? '편집 도구를 왼쪽에 배치' : '편집 도구를 오른쪽에 배치'} title={inspectorDock === 'right' ? '왼쪽 벽에 배치' : '오른쪽 벽에 배치'}>{inspectorDock === 'right' ? '⇤' : '⇥'}</button><button className="inspector-hide-toggle" type="button" onClick={() => setInspectorCollapsed(true)} aria-label="편집 도구 숨기기" title="편집 도구 숨기기">×</button></div>
             <div className="inspector-controls">
               <label className="style-field"><span>템플릿</span><select value={template} onChange={(event) => { const value = event.target.value; setTemplate(value); if (templateStyles[value]) setPptStyle({ ...templateStyles[value] }); }}><option value="original">기본 남색</option><option value="sky">맑은 하늘</option><option value="white">깔끔한 흰색</option><option value="black">선명한 검정</option><option value="custom">직접 설정</option></select></label>
               <div className="inspector-group"><h3>색상</h3><div className="style-grid"><label className="style-field"><span>배경</span><input type="color" value={pptStyle.backgroundColor} onChange={(event) => updateStyle({ backgroundColor: event.target.value })} /></label><label className="style-field"><span>글자</span><input type="color" value={slideTextColors[previewIndex] ?? pptStyle.textColor} onChange={(event) => setSlideTextColors((colors) => ({ ...colors, [previewIndex]: event.target.value }))} /></label></div></div>
@@ -1041,7 +1043,8 @@ export function WorshipApp() {
               {pptNotice && <p className={`notice ${pptNotice.kind ?? ''}`} role="status" aria-live="polite">{pptNotice.text}</p>}
             </div>
             <div className="inspector-footer"><button className="editor-queue-link" type="button" onClick={() => { setEditorTab('songs'); window.requestAnimationFrame(() => selectedQueueRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })); }} aria-label={`제작 목록, ${selected.length}곡 · ${preview?.slideCount ?? 1}장`}>{selected.length}곡 · {preview?.slideCount ?? 1}장 <span>제작 목록</span></button><button className="btn btn--primary" type="button" onClick={createPpt} disabled={creating}>{creating ? '만드는 중…' : 'PPTX 다운로드'}</button></div>
-          </aside>
+          </aside>}
+          {inspectorCollapsed && <button className={`inspector-reopen-tab is-${inspectorDock}`} type="button" onClick={() => setInspectorCollapsed(false)} aria-label="편집 도구 다시 열기" title="편집 도구 다시 열기">{inspectorDock === 'right' ? '‹' : '›'}<span>편집 도구</span></button>}
         </main>
       ) : (
         <main className="manage-page" id="manage">
