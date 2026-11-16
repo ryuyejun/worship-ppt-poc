@@ -302,6 +302,8 @@ footer.app-footer.closing { height: auto; min-height: 0; padding: 18px 40px 20px
 .recent-song-section { display: grid; align-content: start; gap: 10px; }
 .recent-song-list { display: grid; gap: 10px; }
 .recent-song-card-shell { position: relative; min-width: 0; }
+.recent-song-delete { position: absolute; z-index: 2; top: 10px; right: 10px; display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 50%; background: rgba(20,29,43,.78); color: #fff; font-size: 20px; line-height: 1; cursor: pointer; }
+.recent-song-delete:focus-visible { outline: 2px solid #2383bb; outline-offset: 2px; }
 .recent-song-card { position: relative; display: flex; width: 100%; height: 90px; overflow: hidden; border: 0; border-radius: 5px; background: linear-gradient(135deg,#e3e8ec,#d7dde2 55%,#e8ecef); padding: 5px; }
 .recent-song-card__image { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 5px; object-fit: cover; }
 .recent-song-card__glass { position: relative; z-index: 1; display: flex; width: 100%; min-width: 0; flex: 1; flex-direction: column; gap: 4px; overflow: hidden; border-radius: 5px; background: rgba(255,255,255,.5); padding: 10px; color: #111; -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); white-space: nowrap; }
@@ -397,7 +399,9 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
 .filmstrip-number { display: grid; height: 24px; flex: 0 0 24px; place-items: center; color: #111; font-size: 16px; font-weight: 400; line-height: 1; }
 .filmstrip-page:disabled .filmstrip-number { opacity: 1; }
 .filmstrip-page:focus-visible { outline: 2px solid #2383bb; outline-offset: 2px; }
-.filmstrip-page-delete { position: absolute; z-index: 2; top: 3px; right: 3px; display: grid; width: 23px; height: 23px; place-items: center; border: 0; border-radius: 50%; background: rgba(20,29,43,.78); color: #fff; font-size: 18px; line-height: 1; opacity: 1; cursor: pointer; transition: background .15s ease, transform .15s ease; }
+.filmstrip-page-delete { position: absolute; z-index: 2; top: 3px; right: 3px; display: grid; width: 23px; height: 23px; place-items: center; border: 0; border-radius: 50%; background: rgba(20,29,43,.78); color: #fff; font-size: 18px; line-height: 1; opacity: 0; pointer-events: none; cursor: pointer; transition: opacity .15s ease, background .15s ease, transform .15s ease; }
+.filmstrip-page-shell:hover .filmstrip-page-delete, .filmstrip-page-shell:focus-within .filmstrip-page-delete { opacity: 1; pointer-events: auto; }
+@media (hover: none) { .filmstrip-page-delete { opacity: 1; pointer-events: auto; } }
 .filmstrip-page-delete:hover { transform: scale(1.08); background: rgba(20,29,43,.96); }
 .filmstrip-add { display: grid; flex: 0 0 181px; width: 181px; height: 102px; align-content: center; justify-items: center; gap: 4px; border: 1px dashed #b7bdc2; border-radius: 2px; background: rgba(255,255,255,.45); color: #68747c; cursor: pointer; }
 .filmstrip-add span { font-size: 27px; line-height: 1; }
