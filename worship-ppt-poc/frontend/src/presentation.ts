@@ -1,6 +1,6 @@
 import type { Song } from './types';
 
-export type SlideStyle = { backgroundColor: string; textColor: string; fontFamily: string; fontSize: number; alignment: 'LEFT' | 'CENTER' | 'RIGHT'; linesPerSlide: number; bold: boolean; backgroundImageBase64?: string; backgroundImageType?: string };
+export type SlideStyle = { backgroundColor: string; textColor: string; fontFamily: string; fontSize: number; alignment: 'LEFT' | 'CENTER' | 'RIGHT'; linesPerSlide: number; bold: boolean; textX?: number; textY?: number; textWidth?: number; textHeight?: number; backgroundImageBase64?: string; backgroundImageType?: string };
 export type SlideSize = { width: number; height: number };
 export type PresentationInput = { slideSize?: SlideSize; songIds: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; extraSlides?: number; removedSlideIndexes?: number[]; pptxBase64?: string; style: SlideStyle };
 export type Slide = { title: string; lines: string[] };
@@ -49,6 +49,10 @@ export async function makePresentation(slides: Slide[], style: SlideStyle, size 
   const { default: PptxGenJS } = await import('pptxgenjs');
   const ppt = new PptxGenJS(); ppt.defineLayout({ name:'CUSTOM', width:size.width/96, height:size.height/96 }); ppt.layout = 'CUSTOM';
   const alignment = { LEFT: 'left', CENTER: 'center', RIGHT: 'right' } as const;
+  const textWidth = size.width * (style.textWidth ?? 87.5) / 100;
+  const textHeight = size.height * (style.textHeight ?? 55.6) / 100;
+  const textX = size.width * (style.textX ?? 50) / 100 - textWidth / 2;
+  const textY = size.height * (style.textY ?? 50) / 100 - textHeight / 2;
   for (const item of slides) {
     const slide = ppt.addSlide();
     slide.background = { color: style.backgroundColor.replace('#', '') };
@@ -56,7 +60,7 @@ export async function makePresentation(slides: Slide[], style: SlideStyle, size 
       const type = style.backgroundImageType === 'PNG' ? 'png' : 'jpeg';
       slide.addImage({ data: `data:image/${type};base64,${style.backgroundImageBase64}`, x: 0, y: 0, w: size.width/96, h: size.height/96 });
     }
-    slide.addText(item.lines.join('\n'), { x: size.width*60/1280/96, y: size.height*120/720/96, w: size.width*840/1280/96, h: size.height*300/720/96,
+    slide.addText(item.lines.join('\n'), { x: textX/96, y: textY/96, w: textWidth/96, h: textHeight/96,
       fontFace: style.fontFamily, fontSize: style.fontSize, color: style.textColor.replace('#', ''),
       bold: style.bold, align: alignment[style.alignment], valign: 'middle', margin: 0 });
   }
@@ -77,15 +81,19 @@ export async function renderSlide(slide: Slide, style: SlideStyle, width = 1280,
   const fontPx = style.fontSize * 4 / 3; const height = fontPx * 1.2;
   ctx.font = `${style.bold ? 'bold ' : ''}${fontPx}px "${style.fontFamily.replace(/["\\]/g, '')}", sans-serif`;
   ctx.fillStyle = style.textColor; ctx.textBaseline = 'middle'; ctx.textAlign = { LEFT: 'left', CENTER: 'center', RIGHT: 'right' }[style.alignment] as CanvasTextAlign;
+  const textWidth = size.width * (style.textWidth ?? 87.5) / 100;
+  const textHeight = size.height * (style.textHeight ?? 55.6) / 100;
+  const textLeft = size.width * (style.textX ?? 50) / 100 - textWidth / 2;
+  const textTop = size.height * (style.textY ?? 50) / 100 - textHeight / 2;
   const wrapped: string[] = [];
   for (const line of slide.lines) {
     let part = '';
-    for (const char of line) { if (part && ctx.measureText(part + char).width > 1120) { wrapped.push(part); part = char; } else part += char; }
+    for (const char of line) { if (part && ctx.measureText(part + char).width > textWidth) { wrapped.push(part); part = char; } else part += char; }
     wrapped.push(part);
   }
-  const x = style.alignment === 'LEFT' ? 80 : style.alignment === 'RIGHT' ? 1200 : 640;
-  const y = 360 - (wrapped.length - 1) * height / 2;
-  ctx.save(); ctx.beginPath(); ctx.rect(80, 160, 1120, 400); ctx.clip();
+  const x = style.alignment === 'LEFT' ? textLeft : style.alignment === 'RIGHT' ? textLeft + textWidth : textLeft + textWidth / 2;
+  const y = textTop + textHeight / 2 - (wrapped.length - 1) * height / 2;
+  ctx.save(); ctx.beginPath(); ctx.rect(textLeft, textTop, textWidth, textHeight); ctx.clip();
   wrapped.forEach((line, index) => ctx.fillText(line, x, y + index * height)); ctx.restore();
   return canvas.toDataURL('image/png').split(',')[1];
 }
