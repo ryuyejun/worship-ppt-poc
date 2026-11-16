@@ -12,7 +12,7 @@ type PptStyle = {
   alignment: 'LEFT' | 'CENTER' | 'RIGHT'; linesPerSlide: number; bold: boolean;
 };
 type Preview = { imageBase64: string; slideIndex: number; slideCount: number };
-type PptPayload = { slideSize?: SlideSize; songIds: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; pptxBase64?: string; style: PptStyle & { backgroundImageBase64?: string; backgroundImageType?: string } };
+type PptPayload = { slideSize?: SlideSize; songIds: number[]; extraSlides?: number; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; pptxBase64?: string; style: PptStyle & { backgroundImageBase64?: string; backgroundImageType?: string } };
 
 const fontOptions = ['Apple SD Gothic Neo', '맑은 고딕 (Malgun Gothic)', 'Pretendard', 'Noto Sans KR', '나눔고딕 (NanumGothic)', 'Noto Serif KR'];
 
@@ -135,6 +135,7 @@ export function WorshipApp() {
   const [fontListOpen, setFontListOpen] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewIndex, setPreviewIndex] = useState(0);
+  const [extraSlideCount, setExtraSlideCount] = useState(0);
   const [prepared, setPrepared] = useState<{ slides: Slide[]; style: SlideStyle; thumbnails: string[]; slideSize: SlideSize } | null>(null);
   const previewCache = useRef(new Map<number, string>());
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -292,6 +293,7 @@ export function WorshipApp() {
     return {
       slideSize,
       songIds: selected.map((song) => song.id),
+      extraSlides: extraSlideCount,
       externalSongs: selected.filter((song) => song.id < 0).map((song) => ({ id: song.id, title: song.title, artist: song.artist, lyrics: song.lyrics ?? '' })),
       ...(existingPptData ? { pptxBase64: existingPptData } : {}),
       style: { ...pptStyle, ...(backgroundImage ? { backgroundImageBase64: backgroundImage.dataUrl.split(',')[1], backgroundImageType: backgroundImage.type } : {}) },
@@ -340,7 +342,7 @@ export function WorshipApp() {
       }
     }, 0);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [selected, pptStyle, backgroundImage, slideSize, existingPpt, existingPptData, existingPptError, validStyle, previewRetry]);
+  }, [selected, pptStyle, backgroundImage, slideSize, existingPpt, existingPptData, existingPptError, validStyle, previewRetry, extraSlideCount]);
 
   useEffect(() => {
     if (!prepared) return;
@@ -698,7 +700,8 @@ export function WorshipApp() {
               </div>
             </div>
             <div className="editor-filmstrip" aria-label="슬라이드 페이지">
-              {Array.from({ length: Math.max(preview?.slideCount ?? 0, 6) }, (_, slide) => <button className={`filmstrip-page ${preview?.slideIndex === slide ? 'is-active' : ''}`} type="button" key={slide} onClick={() => setPreviewIndex(slide)} disabled={!preview || slide >= preview.slideCount} aria-label={`${slide + 1}번 슬라이드 미리보기`} aria-current={preview?.slideIndex === slide ? 'page' : undefined}><span className="filmstrip-canvas">{prepared?.thumbnails[slide] && <img src={`data:image/png;base64,${prepared.thumbnails[slide]}`} alt="" />}</span><span className="filmstrip-number">{slide + 1}</span></button>)}
+              {Array.from({ length: preview?.slideCount ?? 0 }, (_, slide) => <button className={`filmstrip-page ${preview?.slideIndex === slide ? 'is-active' : ''}`} type="button" key={slide} onClick={() => setPreviewIndex(slide)} disabled={!preview} aria-label={`${slide + 1}번 슬라이드 미리보기`} aria-current={preview?.slideIndex === slide ? 'page' : undefined}><span className="filmstrip-canvas">{prepared?.thumbnails[slide] && <img src={`data:image/png;base64,${prepared.thumbnails[slide]}`} alt="" />}</span><span className="filmstrip-number">{slide + 1}</span></button>)}
+              {preview && <button className="filmstrip-add" type="button" onClick={() => { setExtraSlideCount((count) => count + 1); setPreviewIndex(preview.slideCount); }} aria-label="페이지 추가"><span aria-hidden="true">＋</span><small>페이지 추가</small></button>}
             </div>
           </section>
           <aside className="editor-inspector" aria-label="슬라이드 편집">
