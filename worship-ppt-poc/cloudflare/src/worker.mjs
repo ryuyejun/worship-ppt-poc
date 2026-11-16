@@ -153,13 +153,27 @@ async function lookupYouTubeSong(song, apiKey) {
   const match = candidates
     .filter(candidate => candidate.lyrics.trim())
     .map(candidate => ({ candidate, score: songTitleScore(song.title, candidate.title) }))
-    .sort((left, right) => right.score - left.score)[0];
+    .sort((left, right) => right.score - left.score || right.candidate.lyrics.length - left.candidate.lyrics.length)[0];
   if (!match || match.score < 0.5) return null;
-  return { ...song, id: -(200000000 + Number(song.id)), title: match.candidate.title, artist: match.candidate.artist || song.artist,
+  return { ...song, id: -(200000000 + Number(song.id)), title: song.title, artist: match.candidate.artist || song.artist,
     source: match.candidate.url, status: 'USER_SUPPLIED', lyrics: match.candidate.lyrics };
 }
 
-async function getSongWithLyrics(db, songId, youtubeApiKey) {
+async function lookupTrendingVideoLyrics(song, videoId, apiKey) {
+  if (!apiKey || !/^[\w-]{11}$/.test(videoId || '')) return null;
+  const url = new URL('https://www.googleapis.com/youtube/v3/videos');
+  url.search = new URLSearchParams({ part: 'snippet', id: videoId, key: apiKey }).toString();
+  const response = await fetch(url, { signal: AbortSignal.timeout(10000), headers: { Accept: 'application/json' } });
+  if (!response.ok) throw new Error('YouTube video lookup failed');
+  const payload = await response.json();
+  const video = Array.isArray(payload.items) ? payload.items.find(item => item.id === videoId) : null;
+  const lyrics = extractLyrics(video?.snippet?.description || '');
+  if (!lyrics) return null;
+  return { ...song, id: -(200000000 + Number(song.id)), source: `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`,
+    status: 'USER_SUPPLIED', lyrics };
+}
+
+async function getSongWithLyrics(db, songId, youtubeApiKey, trendingVideoId) {
   const stored = await getSong(db, songId);
   if (stored?.lyrics?.trim()) return stored;
   const row = await db.prepare('SELECT id, title, lyricist, composer, artist, lyrics_status, source_url, category, hymn_number FROM songs WHERE id = ? LIMIT 1').bind(songId).first();
@@ -170,6 +184,10 @@ async function getSongWithLyrics(db, songId, youtubeApiKey) {
     const lrclib = await lookupLrclibSong(song);
     if (lrclib) return lrclib;
   } catch { /* LRCLIB fail/limit: continue to YouTube. */ }
+  try {
+    const trendingVideo = await lookupTrendingVideoLyrics(song, trendingVideoId, youtubeApiKey);
+    if (trendingVideo) return trendingVideo;
+  } catch { /* Use the generic YouTube search as a fallback. */ }
   try {
     const youtube = await lookupYouTubeSong(song, youtubeApiKey);
     if (youtube) return youtube;
@@ -233,7 +251,8 @@ export default {
       }
       if (path === '/song-lyrics') {
         if (!Number.isSafeInteger(input?.id) || input.id < 1) return fail('곡 번호를 확인해 주세요.', 400);
-        const song = await getSongWithLyrics(env.DB, input.id, env.YOUTUBE_API_KEY);
+        if (input?.videoId != null && (typeof input.videoId !== 'string' || !/^[\w-]{11}$/.test(input.videoId))) return fail('영상 정보를 확인해 주세요.', 400);
+        const song = await getSongWithLyrics(env.DB, input.id, env.YOUTUBE_API_KEY, input.videoId);
         if (!song) return fail('곡을 찾을 수 없습니다.', 404);
         if (!song.lyrics?.trim()) return fail('DB, LRCLIB, YouTube 영상 설명란에서 가사를 찾지 못했습니다.', 404);
         return ok(song);

@@ -204,13 +204,13 @@ export function WorshipApp() {
     }
   }, [youtubeVideos, favoriteArtwork]);
 
-  function selectSong(song: Song, closeSearch = true) {
+  function selectSong(song: Song, closeSearch = true, trendingVideoId?: string) {
     setActiveSong(song);
     setLyricsLoadError(null);
     if (song.id > 0) setSongSelectionCounts((counts) => ({ ...counts, [song.id]: (counts[song.id] ?? 0) + 1 }));
     if (cloudflareMode && song.id > 0 && !song.lyrics) {
       setLyricsLoadingSongId(song.id);
-      void api<Song>('/song-lyrics', { id: song.id }).then(({ data }) => {
+      void api<Song>('/song-lyrics', { id: song.id, videoId: trendingVideoId }).then(({ data }) => {
         if (data.id < 0) setExternalResults((songs) => [data, ...songs.filter((item) => item.id !== data.id)]);
         setActiveSong((current) => current?.id === song.id ? data : current);
       }).catch((error: unknown) => {
@@ -229,9 +229,10 @@ export function WorshipApp() {
   }
 
   async function openTrendingSong(songId: number) {
+    const trendingVideoId = youtubeVideos.find((video) => video.songId === songId)?.videoId;
     const loadedSong = readySongs.find((song) => song.id === songId) ?? allSongs.find((song) => song.id === songId);
     if (loadedSong) {
-      selectSong(loadedSong);
+      selectSong(loadedSong, true, trendingVideoId);
       return;
     }
 
@@ -239,7 +240,7 @@ export function WorshipApp() {
       const response = await api<Song[]>('/songs');
       setAllSongs(response.data);
       const song = response.data.find((item) => item.id === songId);
-      if (song) selectSong(song);
+      if (song) selectSong(song, true, trendingVideoId);
       else setEditorTab('songs');
     } catch {
       setEditorTab('songs');
