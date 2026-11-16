@@ -3,6 +3,7 @@ from __future__ import annotations
 import hmac
 import json
 import os
+import re
 import unicodedata
 import urllib.error
 import urllib.parse
@@ -61,15 +62,102 @@ class LyricsImport(BaseModel):
 
 
 class LyricsResponse(BaseModel):
-    id: int
+    id: int | None
     artist: str
     title: str
     lyrics: str
-    source_url: str | None
+    source_url: str | None = None
+    provider: str = "LOCAL"
 
 
 def normalize(value: str) -> str:
     return "".join(unicodedata.normalize("NFC", value).casefold().split())
+
+
+def lrclib_search(artist: str, title: str) -> list[dict]:
+    search_parameters = {"track_name": title}
+    if artist.strip():
+        search_parameters["artist_name"] = artist
+    parameters = urllib.parse.urlencode(search_parameters)
+    request = urllib.request.Request(
+        f"https://lrclib.net/api/search?{parameters}",
+        headers={"X-User-Agent": "YebitLyricsAPI/1.0 (https://github.com/ryuyejun/worship-ppt-poc)"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=6) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        return []
+    return [record for record in payload if isinstance(record, dict)] if isinstance(payload, list) else []
+
+
+def lrclib_lyrics(record: dict) -> str:
+    plain = record.get("plainLyrics")
+    if isinstance(plain, str) and plain.strip():
+        return plain.strip()
+    synced = record.get("syncedLyrics")
+    if not isinstance(synced, str):
+        return ""
+    text = re.sub(r"^\[\d{2}:\d{2}(?:\.\d+)?\]\s*", "", synced, flags=re.MULTILINE)
+    return text.strip()
+
+
+def lrclib_match(artist: str, title: str) -> dict | None:
+    requested_artist = normalize(artist)
+    requested_title = normalize(title)
+    records = lrclib_search(artist, title)
+    eligible = [
+        record
+        for record in records
+        if lrclib_lyrics(record)
+        and normalize(str(record.get("trackName", ""))) == requested_title
+        and normalize(str(record.get("artistName", ""))) == requested_artist
+    ]
+    return eligible[0] if eligible else None
+
+
+def lrclib_song_results(artist: str, title: str) -> list[dict[str, str | None]]:
+    output = []
+    for record in lrclib_search(artist, title):
+        track_name = str(record.get("trackName", "")).strip()
+        artist_name = str(record.get("artistName", "")).strip()
+        if not track_name or not artist_name:
+            continue
+        output.append(
+            {
+                "title": track_name,
+                "artist": artist_name,
+                "album": record.get("albumName"),
+                "source": "LRCLIB",
+                "source_url": f"https://lrclib.net/track/{record.get('id')}" if record.get("id") else "https://lrclib.net",
+                "lyrics_available": bool(lrclib_lyrics(record)),
+            }
+        )
+    return output
+
+
+def result_identity(result: dict) -> tuple[str, str]:
+    title = str(result.get("title", ""))
+    artist = str(result.get("artist", ""))
+    return normalize(title), normalize(artist)
+
+
+def youtube_result_is_duplicate(result: dict, existing_results: list[dict]) -> bool:
+    candidate_title = normalize(str(result.get("title", "")))
+    if not candidate_title:
+        return True
+
+    candidate_artist = normalize(str(result.get("artist", "")))
+    for existing in existing_results:
+        existing_title, existing_artist = result_identity(existing)
+        same_artist = not candidate_artist or not existing_artist or candidate_artist == existing_artist
+        same_youtube_title = existing.get("source") == "YouTube" and candidate_title == existing_title
+        if candidate_title == existing_title and (same_artist or same_youtube_title):
+            return True
+        # YouTube video titles often append labels such as “가사”, “Official MV”, or “Live”.
+        if existing_title and len(existing_title) >= 3 and existing_title in candidate_title:
+            return True
+    return False
 
 
 def find_youtube_candidates(artist: str, title: str) -> list[dict[str, str]]:
@@ -80,7 +168,7 @@ def find_youtube_candidates(artist: str, title: str) -> list[dict[str, str]]:
     parameters = urllib.parse.urlencode(
         {
             "part": "snippet",
-            "q": f"{artist} {title} 가사",
+            "q": f"{artist} {title} 가사".strip(),
             "type": "video",
             "maxResults": 3,
             "relevanceLanguage": "ko",
@@ -197,6 +285,17 @@ def get_lyrics(
             },
         )
     if lyric is None:
+        lrclib_record = lrclib_match(artist, title)
+        if lrclib_record is not None:
+            record_id = lrclib_record.get("id")
+            return LyricsResponse(
+                id=None,
+                artist=str(lrclib_record.get("artistName", artist)),
+                title=str(lrclib_record.get("trackName", title)),
+                lyrics=lrclib_lyrics(lrclib_record),
+                source_url=f"https://lrclib.net/track/{record_id}" if record_id else "https://lrclib.net",
+                provider="LRCLIB",
+            )
         candidates = find_youtube_candidates(artist, title)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -211,7 +310,57 @@ def get_lyrics(
         title=lyric.title,
         lyrics=lyric.lyrics,
         source_url=lyric.source_url,
+        provider="LOCAL",
     )
+
+
+@app.get("/songs/search")
+def search_songs(
+    artist: str = Query(default="", max_length=255),
+    title: str = Query(min_length=1, max_length=255),
+    session: Session = Depends(get_session),
+) -> dict[str, list[dict]]:
+    normalized_title = normalize(title)
+    local_songs = list(
+        session.scalars(
+            select(Lyric).where(Lyric.normalized_title.contains(normalized_title)).order_by(Lyric.id)
+        ).all()
+    )
+    results: list[dict] = [
+        {
+            "id": song.id,
+            "title": song.title,
+            "artist": song.artist,
+            "source": "LOCAL",
+            "source_url": song.source_url,
+            "lyrics_available": bool(song.lyrics.strip()),
+        }
+        for song in local_songs
+    ]
+    seen = {result_identity(result) for result in results}
+
+    for result in lrclib_song_results(artist, title):
+        identity = result_identity(result)
+        if identity not in seen:
+            results.append(result)
+            seen.add(identity)
+
+    for result in find_youtube_candidates(artist, title):
+        search_result = {
+            "title": result["title"],
+            "artist": result["channel"],
+            "source": "YouTube",
+            "source_url": result["url"],
+            "video_id": result["video_id"],
+            "description": result["description"],
+            "lyrics_available": False,
+        }
+        identity = result_identity(search_result)
+        if identity not in seen and not youtube_result_is_duplicate(search_result, results):
+            results.append(search_result)
+            seen.add(identity)
+
+    return {"results": results}
 
 
 @app.post("/lyrics", response_model=LyricsResponse, status_code=status.HTTP_201_CREATED)

@@ -104,7 +104,36 @@ export default {
           .bind(`%${query}%`, `%${query}%`).all();
         return ok(results);
       }
-      if (path === '/providers/search') return ok({ candidates: [], status: ['추가 제공처는 아직 연결되지 않았습니다'] });
+      if (path === '/providers/search') {
+        const title = typeof input?.title === 'string' ? input.title.trim().slice(0, 100) : '';
+        if (!title) return ok({ candidates: [], status: ['검색어를 입력해 주세요'] });
+        if (!env.YOUTUBE_API_KEY) return ok({ candidates: [], status: ['YouTube 검색 키가 설정되지 않았습니다'] });
+        const youtubeUrl = new URL('https://www.googleapis.com/youtube/v3/search');
+        youtubeUrl.search = new URLSearchParams({
+          part: 'snippet', q: `${title} 찬양 가사`, type: 'video', maxResults: '5',
+          relevanceLanguage: 'ko', regionCode: 'KR', key: env.YOUTUBE_API_KEY,
+        }).toString();
+        try {
+          const response = await fetch(youtubeUrl, { headers: { Accept: 'application/json' } });
+          if (!response.ok) return ok({ candidates: [], status: ['YouTube 검색을 불러오지 못했습니다'] });
+          const payload = await response.json();
+          const candidates = (Array.isArray(payload.items) ? payload.items : []).flatMap(item => {
+            const videoId = item?.id?.videoId;
+            const snippet = item?.snippet;
+            if (!videoId || !snippet?.title) return [];
+            return [{
+              title: snippet.title,
+              artist: snippet.channelTitle || '',
+              source: 'YouTube',
+              videoId,
+              url: `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`,
+            }];
+          });
+          return ok({ candidates, status: [`YouTube 영상 후보 ${candidates.length}개`] });
+        } catch {
+          return ok({ candidates: [], status: ['YouTube 검색 연결에 실패했습니다'] });
+        }
+      }
       return ok(await findArtwork(env.DB, input?.songId, env.PIXABAY_API_KEY, input?.title));
     } catch (error) {
       if (error instanceof TypeError) return fail('곡 제목을 확인해 주세요.', 400);

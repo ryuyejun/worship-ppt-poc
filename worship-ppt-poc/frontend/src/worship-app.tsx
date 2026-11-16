@@ -80,7 +80,7 @@ export function WorshipApp() {
   const [searchNotice, setSearchNotice] = useState<Notice>(null);
   const [pptNotice, setPptNotice] = useState<Notice>(null);
   const [searching, setSearching] = useState(false);
-  const [providerInfo, setProviderInfo] = useState<{ title: string; artist: string; source: string }[]>([]);
+  const [providerInfo, setProviderInfo] = useState<{ title: string; artist: string; source: string; videoId?: string; url?: string }[]>([]);
   const [externalResults, setExternalResults] = useState<Song[]>([]);
   const [creating, setCreating] = useState(false);
   const [loadingSongs, setLoadingSongs] = useState(true);
@@ -481,6 +481,18 @@ export function WorshipApp() {
         } catch { setSearchNotice({ text: '찬송가를 불러오지 못했습니다.', kind: 'error' }); }
         return;
       }
+      let localSongs: Song[] = [];
+      try {
+        const local = await api<Song[]>('/search', { title: query.trim() });
+        localSongs = local.data;
+        setResults(localSongs);
+        messages.push(`내 DB: 가사 ${localSongs.length}곡`);
+        if (localSongs.length === 1) selectSong(localSongs[0], false);
+        if (!localSongs.length) {
+          if (cloudflareMode && !local.headers.has('X-Request-Count')) messages.push('저장된 가사를 찾지 못했습니다');
+          else { messages.push('곡 추가 대기열에 기록했습니다'); await loadRequests(); }
+        }
+      } catch { messages.push('내 DB: 조회 실패'); }
       let found: Song[] = [];
       try {
         const headers = { 'X-User-Agent': 'WorshipPPT/1.0 (https://github.com/ryuyejun/worship-ppt-poc)' };
@@ -502,7 +514,7 @@ export function WorshipApp() {
         const unique = new Set<string>();
         found = records.filter((record) => {
           if (!record.plainLyrics?.trim() && !record.syncedLyrics?.trim()) return false;
-          const key = [record.trackName, record.artistName, record.albumName, record.plainLyrics || record.syncedLyrics || ''].map((value) => (value || '').normalize('NFC').toLowerCase().replace(/\s+/g, '')).join('|');
+          const key = [record.trackName, record.artistName].map((value) => (value || '').normalize('NFC').toLowerCase().replace(/\s+/g, '')).join('|');
           if (unique.has(key)) return false;
           unique.add(key); return true;
         }).map((record) => ({
@@ -512,30 +524,23 @@ export function WorshipApp() {
         }));
         messages.push(`LRCLIB: 가사 ${found.length}곡`);
       } catch { messages.push('LRCLIB: 연결 실패'); }
-      if (found.length) {
-        setExternalResults(found);
-        setSearchNotice({ text: messages.join(' · ') + ' · 검색어와 가수 이름이 일치하는 곡입니다.' });
-        return;
-      }
+      const normalizeSearchTitle = (value: string) => value.normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+      const localKeys = new Set(localSongs.map((song) => `${normalizeSearchTitle(song.title)}|${normalizeSearchTitle(song.artist || '')}`));
+      found = found.filter((song) => !localKeys.has(`${normalizeSearchTitle(song.title)}|${normalizeSearchTitle(song.artist || '')}`));
+      setExternalResults(found);
       try {
-        const providers = await api<{ candidates: { title: string; artist: string; source: string }[]; status: string[] }>('/providers/search', { title: query.trim() });
-        const unique = new Set<string>();
-        setProviderInfo(providers.data.candidates.filter((candidate) => {
-          const key = [candidate.title, candidate.artist, candidate.source].map((value) => value.normalize('NFC').toLowerCase().replace(/\s+/g, '')).join('|');
-          if (unique.has(key)) return false; unique.add(key); return true;
-        }));
+        const providers = await api<{ candidates: { title: string; artist: string; source: string; videoId?: string; url?: string }[]; status: string[] }>('/providers/search', { title: query.trim() });
+        const knownTitles = [...found, ...localSongs].map((song) => normalizeSearchTitle(song.title)).filter((title) => title.length >= 3);
+        const uniqueVideoTitles = new Set<string>();
+        const videos = providers.data.candidates.filter((candidate) => {
+          const title = normalizeSearchTitle(candidate.title);
+          if (!title || uniqueVideoTitles.has(title) || knownTitles.some((known) => title.includes(known))) return false;
+          uniqueVideoTitles.add(title);
+          return true;
+        });
+        setProviderInfo(videos);
         messages.push(...providers.data.status);
-      } catch { messages.push('추가 제공처: 조회 실패'); }
-      try {
-        const local = await api<Song[]>('/search', { title: query.trim() });
-        setResults(local.data);
-        messages.push(`내 DB: 가사 ${local.data.length}곡`);
-        if (local.data.length === 1) selectSong(local.data[0], false);
-        if (!local.data.length) {
-          if (cloudflareMode && !local.headers.has('X-Request-Count')) messages.push('저장된 가사를 찾지 못했습니다');
-          else { messages.push('곡 추가 대기열에 기록했습니다'); await loadRequests(); }
-        }
-      } catch { messages.push('내 DB: 조회 실패'); }
+      } catch { messages.push('곡 목록 또는 YouTube 검색을 불러오지 못했습니다'); }
       setSearchNotice({ text: messages.join(' · ') });
     } finally { setSearching(false); }
   }
@@ -747,7 +752,7 @@ export function WorshipApp() {
                   {searching && <p className="search-result-hint">곡을 찾고 있습니다…</p>}
                   {!searching && !searchNotice && <p className="search-result-hint">Enter를 누르면 전체 검색을 시작합니다.</p>}
                   {searchNotice && <p className={`search-result-hint ${searchNotice.kind ?? ''}`}>{searchNotice.text}</p>}
-                  {providerInfo.length > 0 && <div className="search-result-group"><span>추가 곡 정보 · 가사 없음</span>{providerInfo.map((song, index) => <div className="search-result-row" key={`${song.source}-${index}`}><strong>{song.title}</strong><small>{song.artist} · {song.source}</small></div>)}</div>}
+                  {providerInfo.length > 0 && <div className="search-result-group"><span>YouTube 영상 후보 · 곡과 가사 확인 필요</span>{providerInfo.map((song, index) => <a className="search-result-row" key={`${song.videoId || song.source}-${index}`} href={song.url} target="_blank" rel="noreferrer"><strong>{song.title}</strong><small>{song.artist} · YouTube 영상 후보</small></a>)}</div>}
                   {externalResults.length > 0 && <div className="search-result-group"><span>LRCLIB 검색 결과 · {externalResults.length}</span>{externalResults.map((song) => <button className="search-result-row" key={song.id} type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>{displayPerson(song.artist)} · {displayPerson(song.album)}</small></button>)}</div>}
                   {results.length > 0 && <div className="search-result-group"><span>내 곡 목록 · {results.length}</span>{results.map((song) => <div className="editor-favorite-row" key={song.id}><button className="search-result-row" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>작사 {displayPerson(song.author)}</small></button><button className={`favorite-toggle${favoriteIds.includes(song.id) ? ' is-favorite' : ''}`} type="button" onClick={() => toggleFavorite(song)} aria-label={favoriteIds.includes(song.id) ? `${song.title} 즐겨찾기 해제` : `${song.title} 즐겨찾기 추가`}>{favoriteIds.includes(song.id) ? '★' : '☆'}</button></div>)}</div>}
                 </div>}
