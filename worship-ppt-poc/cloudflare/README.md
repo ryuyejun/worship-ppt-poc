@@ -18,3 +18,5 @@ npx wrangler deploy --config cloudflare/wrangler.web.test.jsonc
 `0005-youtube-channels.sql`도 적용하면 `youtube_channels`에 등록된 채널별 최근 업로드 최대 10개를 매주 찾아 추가한다. 영상 제목은 YouTube 원본 그대로 저장하므로 합곡·예배 전체 영상도 표시할 수 있다. 전체 영상의 통계를 첫 곡의 통계로 잘못 연결하지 않으며, `song_id`는 별도로 확인한 경우에만 설정한다.
 
 곡 검색의 `POST /providers/search`는 검색 후보의 영상 설명을 YouTube `videos.list`로 추가 조회하고, URL·홍보·출처 안내를 제외한 5줄 이상의 가사형 본문을 응답에 포함한다. 이 본문은 검색 결과와 미리보기에만 사용하며 D1에 저장하지 않는다. 검색 결과에서 가사 본문을 확인할 수 있는 후보를 선택하면 기존 PPT 제작 흐름에서 사용할 수 있다.
+
+트렌드·최근·즐겨찾기에서 가사가 비어 있는 등록곡을 선택하면 `POST /song-lyrics`가 D1 → LRCLIB → YouTube 영상 설명란 순으로 가사를 조회한다. 외부에서 찾은 가사는 일시적으로 반환하고 D1에 저장하지 않으며, PPT 제작 목록에는 외부 가사 입력으로 포함한다.

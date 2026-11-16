@@ -210,7 +210,8 @@ export function WorshipApp() {
     if (song.id > 0) setSongSelectionCounts((counts) => ({ ...counts, [song.id]: (counts[song.id] ?? 0) + 1 }));
     if (cloudflareMode && song.id > 0 && !song.lyrics) {
       setLyricsLoadingSongId(song.id);
-      void api<Song>('/song', { id: song.id }).then(({ data }) => {
+      void api<Song>('/song-lyrics', { id: song.id }).then(({ data }) => {
+        if (data.id < 0) setExternalResults((songs) => [data, ...songs.filter((item) => item.id !== data.id)]);
         setActiveSong((current) => current?.id === song.id ? data : current);
       }).catch((error: unknown) => {
         setLyricsLoadError({
@@ -218,7 +219,7 @@ export function WorshipApp() {
           message: error instanceof Error ? error.message : '가사를 불러오지 못했습니다.',
         });
       }).finally(() => {
-        setLyricsLoadingSongId((current) => current === song.id ? null : current);
+        setLyricsLoadingSongId(null);
       });
     }
     setEditorTab('songs');
@@ -250,7 +251,7 @@ export function WorshipApp() {
     if (loadedSong) { selectSong(loadedSong); return; }
     if (recent.id > 0) {
       try {
-        const response = await api<Song>('/song', { id: recent.id });
+        const response = await api<Song>('/song-lyrics', { id: recent.id });
         selectSong(response.data);
         return;
       } catch {

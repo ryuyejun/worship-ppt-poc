@@ -6,7 +6,7 @@ import { matchSongVideos } from './song-video-match.mjs';
 const json = (body, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
 const fail = (message, status) => json({ success: false, data: null, error: message }, status);
 const ok = data => json({ success: true, data, error: null });
-const routes = new Set(['/songs', '/ppt-songs', '/search', '/song', '/requests', '/providers/search', '/song-artwork/search', '/youtube-videos']);
+const routes = new Set(['/songs', '/ppt-songs', '/search', '/song', '/song-lyrics', '/requests', '/providers/search', '/song-artwork/search', '/youtube-videos']);
 
 async function getTrendingSongs(db) {
   const { results: videos } = await db.prepare(`SELECT v.video_id AS videoId, v.video_title AS videoTitle, s.view_count AS views, s.like_count AS likes, s.fetched_at AS fetchedAt
@@ -111,6 +111,72 @@ async function searchYouTubeLyrics(title, apiKey) {
   });
 }
 
+function normalizeSongText(value) {
+  return String(value || '').normalize('NFC').toLocaleLowerCase('ko-KR').replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+function songTitleScore(requestedTitle, candidateTitle) {
+  const requested = normalizeSongText(requestedTitle);
+  const candidate = normalizeSongText(candidateTitle);
+  if (!requested || !candidate) return 0;
+  if (requested.includes(candidate) || candidate.includes(requested)) return 1;
+  const tokens = requestedTitle.split(/\s+/u).map(normalizeSongText).filter(token => token.length > 1);
+  return tokens.length ? tokens.filter(token => candidate.includes(token)).length / tokens.length : 0;
+}
+
+async function lookupLrclibSong(song, fetcher = fetch) {
+  const artist = String(song.artist || '').trim();
+  const unknownArtist = /^(미확인|미확인한 곡|정보 없음|unknown)$/i.test(artist);
+  const params = new URLSearchParams({ track_name: song.title });
+  if (artist && !unknownArtist) params.set('artist_name', artist);
+  const response = await fetcher(`https://lrclib.net/api/search?${params}`, {
+    headers: { 'X-User-Agent': 'Yebit/1.0 (https://github.com/ryuyejun/worship-ppt-poc)' },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) return null;
+  const records = await response.json();
+  if (!Array.isArray(records)) return null;
+  const match = records
+    .filter(record => typeof record?.trackName === 'string' && songTitleScore(song.title, record.trackName) >= 0.8)
+    .filter(record => (typeof record.plainLyrics === 'string' && record.plainLyrics.trim()) || (typeof record.syncedLyrics === 'string' && record.syncedLyrics.trim()))
+    .sort((left, right) => songTitleScore(song.title, right.trackName) - songTitleScore(song.title, left.trackName))[0];
+  if (!match) return null;
+  const lyrics = (match.plainLyrics || match.syncedLyrics.replace(/^\[\d{2}:\d{2}(?:\.\d+)?\]\s*/gm, '')).trim();
+  return { ...song, id: -(300000000 + Number(match.id || song.id)), artist: match.artistName || song.artist,
+    title: match.trackName || song.title, source: match.id ? `https://lrclib.net/track/${match.id}` : 'https://lrclib.net',
+    status: 'USER_SUPPLIED', lyrics };
+}
+
+async function lookupYouTubeSong(song, apiKey) {
+  if (!apiKey) return null;
+  const candidates = await searchYouTubeLyrics(song.title, apiKey);
+  const match = candidates
+    .filter(candidate => candidate.lyrics.trim())
+    .map(candidate => ({ candidate, score: songTitleScore(song.title, candidate.title) }))
+    .sort((left, right) => right.score - left.score)[0];
+  if (!match || match.score < 0.5) return null;
+  return { ...song, id: -(200000000 + Number(song.id)), title: match.candidate.title, artist: match.candidate.artist || song.artist,
+    source: match.candidate.url, status: 'USER_SUPPLIED', lyrics: match.candidate.lyrics };
+}
+
+async function getSongWithLyrics(db, songId, youtubeApiKey) {
+  const stored = await getSong(db, songId);
+  if (stored?.lyrics?.trim()) return stored;
+  const row = await db.prepare('SELECT id, title, lyricist, composer, artist, lyrics_status, source_url, category, hymn_number FROM songs WHERE id = ? LIMIT 1').bind(songId).first();
+  if (!row) return null;
+  const song = { id: row.id, title: row.title, author: row.lyricist, composer: row.composer, artist: row.artist,
+    status: row.lyrics_status, source: row.source_url, category: row.category, hymnNumber: row.hymn_number };
+  try {
+    const lrclib = await lookupLrclibSong(song);
+    if (lrclib) return lrclib;
+  } catch { /* LRCLIB fail/limit: continue to YouTube. */ }
+  try {
+    const youtube = await lookupYouTubeSong(song, youtubeApiKey);
+    if (youtube) return youtube;
+  } catch { /* Keep the song metadata and return no lyrics. */ }
+  return song;
+}
+
 export default {
   async scheduled(_event, env, ctx) {
     ctx.waitUntil((async () => {
@@ -164,6 +230,13 @@ export default {
         if (!Number.isSafeInteger(input?.id) || input.id < 1) return fail('곡 번호를 확인해 주세요.', 400);
         const song = await getSong(env.DB, input.id);
         return song ? ok(song) : fail('가사가 저장된 곡을 찾을 수 없습니다.', 404);
+      }
+      if (path === '/song-lyrics') {
+        if (!Number.isSafeInteger(input?.id) || input.id < 1) return fail('곡 번호를 확인해 주세요.', 400);
+        const song = await getSongWithLyrics(env.DB, input.id, env.YOUTUBE_API_KEY);
+        if (!song) return fail('곡을 찾을 수 없습니다.', 404);
+        if (!song.lyrics?.trim()) return fail('DB, LRCLIB, YouTube 영상 설명란에서 가사를 찾지 못했습니다.', 404);
+        return ok(song);
       }
       if (path === '/requests') {
         const query = typeof input?.query === 'string' ? input.query.trim().slice(0, 255) : '';
