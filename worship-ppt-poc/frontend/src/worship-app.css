@@ -244,7 +244,7 @@ footer.app-footer.closing { height: auto; min-height: 0; padding: 18px 40px 20px
 .editor-inspector { z-index: 3; }
 .inspector-resize-handle { position: absolute; z-index: 6; top: 0; bottom: 0; left: 0; width: 7px; cursor: col-resize; touch-action: none; }
 .inspector-resize-handle.is-left { right: 0; left: auto; }
-.inspector-resize-handle:hover, .inspector-resize-handle:focus-visible, .inspector-resize-handle:active { background: rgba(54, 151, 197, .55); outline: none; }
+.inspector-resize-handle:hover, .inspector-resize-handle:focus-visible, .inspector-resize-handle:active { background: transparent; outline: none; }
 .editor-brand { position: absolute; top: 15px; left: 10px; display: flex; width: 112px; height: 55px; align-items: center; gap: 5px; color: #111; text-decoration: none; }
 .editor-brand img { width: 55px; height: 55px; flex: 0 0 55px; object-fit: cover; }
 .editor-brand span { display: grid; gap: 2px; }
