@@ -539,7 +539,7 @@ export function WorshipApp() {
           return true;
         });
         setProviderInfo(videos);
-        messages.push(...providers.data.status);
+        messages.push(`YouTube 검색 결과 ${videos.length}개 표시`);
       } catch { messages.push('곡 목록 또는 YouTube 검색을 불러오지 못했습니다'); }
       setSearchNotice({ text: messages.join(' · ') });
     } finally { setSearching(false); }
