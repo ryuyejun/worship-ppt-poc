@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { api, cloudflareMode } from './api';
-import type { Song, SongRequest } from './types';
+import type { ApiResponse, Song, SongRequest } from './types';
 import { collectSlides, renderSlide, type Slide, type SlideSize, type SlideStyle, type SlideTextPosition } from './presentation';
 
 type Notice = { text: string; kind?: 'error' | 'success' } | null;
@@ -62,6 +62,18 @@ function displayKnown(value?: string | null) {
   return /^(미확인|미확인한 곡|정보 없음|unknown)$/i.test(text) ? '' : text;
 }
 
+async function authRequest<T>(path: string, method: 'GET' | 'POST', body?: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method,
+    credentials: 'same-origin',
+    headers: method === 'POST' ? { 'Content-Type': 'application/json' } : undefined,
+    body: method === 'POST' ? JSON.stringify(body ?? {}) : undefined,
+  });
+  const payload = await response.json() as ApiResponse<T>;
+  if (!response.ok || !payload.success) throw new Error(payload.error || '인증 요청을 처리하지 못했습니다.');
+  return payload.data;
+}
+
 function trackSearchGlassReflection(event: React.PointerEvent<HTMLDivElement>) {
   if (event.pointerType !== 'mouse' || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const glass = event.currentTarget.querySelector<HTMLElement>('.editor-search-widget');
@@ -88,6 +100,13 @@ function downloadPpt(blob: Blob, name: string) {
 }
 
 export function WorshipApp() {
+  const [authStatus, setAuthStatus] = useState<'checking' | 'authenticated' | 'anonymous'>('checking');
+  const [authUser, setAuthUser] = useState<{ id: number; email: string } | null>(null);
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [authSubmitting, setAuthSubmitting] = useState(false);
   const [page, setPage] = useState<'create' | 'manage'>(window.location.hash === '#manage' ? 'manage' : 'create');
   const [navOpen, setNavOpen] = useState(false);
   const [inspectorDock, setInspectorDock] = useState<'left' | 'right'>(() => localStorage.getItem('yebit-inspector-dock') === 'left' ? 'left' : 'right');
@@ -110,6 +129,25 @@ export function WorshipApp() {
   const originalSongOrderRef = useRef<number[] | null>(null);
   const pendingSongPositionsRef = useRef<Map<number, number>>(new Map());
   const [draggedSongId, setDraggedSongId] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function restoreSession() {
+      try {
+        const result = await authRequest<{ user: { id: number; email: string } }>('/auth/me', 'GET');
+        if (!cancelled) { setAuthUser(result.user); setAuthStatus('authenticated'); }
+      } catch {
+        try {
+          const result = await authRequest<{ user: { id: number; email: string } }>('/auth/refresh', 'POST');
+          if (!cancelled) { setAuthUser(result.user); setAuthStatus('authenticated'); }
+        } catch {
+          if (!cancelled) setAuthStatus('anonymous');
+        }
+      }
+    }
+    void restoreSession();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => { if (inspectorWidth >= 240) { lastInspectorWidthRef.current = inspectorWidth; localStorage.setItem('yebit-inspector-width', String(inspectorWidth)); } }, [inspectorWidth]);
   useEffect(() => { localStorage.setItem('yebit-inspector-dock', inspectorDock); }, [inspectorDock]);
@@ -196,6 +234,7 @@ export function WorshipApp() {
   const [pptStyle, setPptStyle] = useState<PptStyle>(templateStyles.original);
   const [template, setTemplate] = useState('original');
   const [backgroundImage, setBackgroundImage] = useState<{ dataUrl: string; type: 'PNG' | 'JPEG'; name: string } | null>(null);
+  const [backgroundDropActive, setBackgroundDropActive] = useState(false);
   const [imageInputKey, setImageInputKey] = useState(0);
   const [libraryError, setLibraryError] = useState('');
   const [editorTab, setEditorTab] = useState<'songs' | 'lyrics' | 'favorites' | 'trending'>('songs');
@@ -266,10 +305,11 @@ export function WorshipApp() {
     return () => window.clearTimeout(timeout);
   }, [activeSong]);
   useEffect(() => {
+    if (authStatus !== 'authenticated') return;
     let cancelled = false;
     api<typeof youtubeVideos>('/youtube-videos').then(({ data }) => { if (!cancelled) { setYoutubeVideos(data); setYoutubeStatus('ready'); } }).catch(() => { if (!cancelled) setYoutubeStatus('error'); });
     return () => { cancelled = true; };
-  }, []);
+  }, [authStatus]);
 
   useEffect(() => {
     try {
@@ -296,26 +336,29 @@ export function WorshipApp() {
   }, [songSelectionCounts]);
 
   useEffect(() => {
+    if (authStatus !== 'authenticated') return;
     for (const recent of recentSongs) {
       const videoId = recent.youtubeVideoId || youtubeVideos.find((video) => video.songId === recent.id)?.videoId;
       if (!videoId) requestSongArtwork(recent);
     }
-  }, [recentSongs, youtubeVideos]);
+  }, [authStatus, recentSongs, youtubeVideos]);
 
   useEffect(() => {
+    if (authStatus !== 'authenticated') return;
     for (const song of favoriteSongs) {
       const hasYoutubeThumbnail = youtubeVideos.some((video) => video.songId === song.id);
       if (!hasYoutubeThumbnail) requestSongArtwork(song);
     }
-  }, [favoriteSongs, favoriteArtwork, youtubeVideos]);
+  }, [authStatus, favoriteSongs, favoriteArtwork, youtubeVideos]);
 
   useEffect(() => {
+    if (authStatus !== 'authenticated') return;
     for (const song of youtubeVideos) {
       if (song.songId > 0 && !favoriteArtwork[song.songId] && !song.artworkUrl) {
         requestSongArtwork({ id: song.songId, title: song.title });
       }
     }
-  }, [youtubeVideos, favoriteArtwork]);
+  }, [authStatus, youtubeVideos, favoriteArtwork]);
 
   function selectSong(song: Song, closeSearch = true, trendingVideoId?: string) {
     setActiveSong(song);
@@ -610,9 +653,10 @@ export function WorshipApp() {
   }
 
   useEffect(() => {
+    if (authStatus !== 'authenticated') return;
     void loadSongs();
     void loadRequests();
-  }, []);
+  }, [authStatus]);
 
   useEffect(() => {
     function closeEditorMenus(event: PointerEvent) {
@@ -848,12 +892,10 @@ export function WorshipApp() {
     textBoxInteraction.current = null;
   }
 
-  function chooseBackground(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
+  function applyBackgroundFile(file?: File) {
     if (!file) return;
     if (!['image/png', 'image/jpeg'].includes(file.type) || file.size > 5_000_000 || file.size === 0) {
       setPptNotice({ text: '배경 이미지는 5MB 이하의 PNG 또는 JPEG 파일을 선택해 주세요.', kind: 'error' });
-      event.target.value = '';
       return;
     }
     const reader = new FileReader();
@@ -863,6 +905,35 @@ export function WorshipApp() {
       setPptNotice(null);
     };
     reader.readAsDataURL(file);
+  }
+
+  function chooseBackground(event: React.ChangeEvent<HTMLInputElement>) {
+    applyBackgroundFile(event.target.files?.[0]);
+    event.target.value = '';
+  }
+
+  async function submitAuth(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAuthSubmitting(true);
+    setAuthError('');
+    try {
+      const path = authMode === 'signup' ? '/auth/signup' : '/auth/login';
+      const result = await authRequest<{ user: { id: number; email: string } }>(path, 'POST', { email: authEmail, password: authPassword });
+      setAuthUser(result.user);
+      setAuthPassword('');
+      setAuthStatus('authenticated');
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : '로그인 요청을 처리하지 못했습니다.');
+    } finally {
+      setAuthSubmitting(false);
+    }
+  }
+
+  async function signOut() {
+    try { await authRequest<{ loggedOut: boolean }>('/auth/logout', 'POST'); } catch { /* 세션이 이미 만료된 경우에도 화면에서 로그아웃합니다. */ }
+    setAuthUser(null);
+    setAuthStatus('anonymous');
+    setAuthPassword('');
   }
 
   async function createPpt() {
@@ -975,6 +1046,29 @@ export function WorshipApp() {
     }
   }
 
+  if (authStatus !== 'authenticated') {
+    return <main className="auth-screen">
+      <section className="auth-card" aria-labelledby="auth-title">
+        <img src="/assets/figma/editor-logo.png" width="54" height="54" alt="" />
+        <p className="auth-eyebrow">Yebit 찬양 PPT</p>
+        <h1 id="auth-title">{authStatus === 'checking' ? '로그인 상태를 확인하고 있습니다' : authMode === 'login' ? '다시 오셨네요' : '계정 만들기'}</h1>
+        {authStatus === 'checking' ? <p className="auth-help">잠시만 기다려 주세요.</p> : <>
+          <div className="auth-mode-switch" role="group" aria-label="로그인 또는 회원가입">
+            <button type="button" aria-pressed={authMode === 'login'} onClick={() => { setAuthMode('login'); setAuthError(''); }}>로그인</button>
+            <button type="button" aria-pressed={authMode === 'signup'} onClick={() => { setAuthMode('signup'); setAuthError(''); }}>회원가입</button>
+          </div>
+          <form className="auth-form" onSubmit={submitAuth}>
+            <label>이메일<input type="email" autoComplete="email" required maxLength={254} value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="name@example.com" /></label>
+            <label>비밀번호<input type="password" autoComplete={authMode === 'login' ? 'current-password' : 'new-password'} required minLength={10} maxLength={128} value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} placeholder="10자 이상" /></label>
+            {authError && <p className="auth-error" role="alert">{authError}</p>}
+            <button className="btn btn--primary" type="submit" disabled={authSubmitting}>{authSubmitting ? '처리 중…' : authMode === 'login' ? '로그인' : '회원가입'}</button>
+          </form>
+          <p className="auth-help">계정으로 로그인하면 찬양 목록과 PPT 제작 기능을 사용할 수 있습니다.</p>
+        </>}
+      </section>
+    </main>;
+  }
+
   return (
     <>
       {page === 'manage' && <header className={`nav app-nav${navOpen ? ' is-open' : ''}`}>
@@ -988,7 +1082,7 @@ export function WorshipApp() {
             <a className="nav__link" href="#create" onClick={() => { setPage('create'); setNavOpen(false); }}>PPT 제작</a>
             <a className="nav__link" href="#manage" aria-current={page === 'manage' ? 'page' : undefined} onClick={() => { setPage('manage'); setNavOpen(false); }}>곡 관리</a>
           </nav>
-          <div className="nav__actions"><span className={`app-online ${libraryError ? 'is-error' : ''}`}><i aria-hidden="true" />{loadingSongs ? '연결 확인 중' : libraryError ? '연결을 확인해 주세요' : '데이터베이스 연결됨'}</span><a className="btn btn--primary" href="#create">PPT 제작</a></div>
+          <div className="nav__actions"><span className={`app-online ${libraryError ? 'is-error' : ''}`}><i aria-hidden="true" />{loadingSongs ? '연결 확인 중' : libraryError ? '연결을 확인해 주세요' : '데이터베이스 연결됨'}</span><span className="auth-account-email">{authUser?.email}</span><button className="btn btn--secondary auth-logout" type="button" onClick={() => void signOut()}>로그아웃</button><a className="btn btn--primary" href="#create">PPT 제작</a></div>
           <button className="nav__toggle" type="button" aria-label={navOpen ? '메뉴 닫기' : '메뉴 열기'} aria-expanded={navOpen} onClick={() => setNavOpen((open) => !open)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d={navOpen ? 'M6 6l12 12M18 6L6 18' : 'M4 7h16M4 12h16M4 17h16'} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg></button>
         </div>
       </header>}
@@ -1045,7 +1139,7 @@ export function WorshipApp() {
             </div>
           </aside>
           <section className="editor-workspace" aria-labelledby="preview-title">
-            <div className="editor-toolbar"><div className="editor-toolbar__left"><div className="editor-title-control" ref={titleControlRef}><svg className="editor-title-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round"/><path d="M13 14h5m-2-2 2 2-2 2" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>{titleEditOpen ? <input className="editor-document-title-input" aria-label="프레젠테이션 제목 편집" style={{width:`${Math.max(1, presentationTitle.length)}em`}} autoFocus value={presentationTitle} onChange={(event) => setPresentationTitle(event.target.value)} maxLength={80} onBlur={() => setTitleEditOpen(false)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === 'Escape') { event.preventDefault(); setTitleEditOpen(false); } }} /> : <button className="editor-document-title" type="button" aria-label="프레젠테이션 제목 수정" aria-expanded={titleEditOpen} onClick={() => setTitleEditOpen(true)}><span>{presentationTitle.trim() || '제목 없는 디자인'}</span></button>}</div><div className="editor-size-control" ref={sizeControlRef}><button className="editor-page-count" type="button" aria-label={`슬라이드 크기 ${slideSize.width} 곱하기 ${slideSize.height} 픽셀`} aria-expanded={sizeOpen} onClick={() => setSizeOpen((open) => !open)}><span>{slideSize.width}×{slideSize.height} px</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4.5 7.5 5.5 5 5.5-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button>{sizeOpen && <div className="editor-size-menu"><div className="editor-size-presets">{[{label:'16:9',width:1280,height:720},{label:'16:10',width:1280,height:800},{label:'4:3',width:1280,height:960},{label:'1:1',width:960,height:960}].map((preset) => <button type="button" key={preset.label} aria-pressed={slideSize.width===preset.width&&slideSize.height===preset.height} onClick={() => setSlideSize({width:preset.width,height:preset.height})}>{preset.label}</button>)}</div><div className="editor-size-custom"><label>가로<input type="number" min="320" max="3840" value={slideSize.width} onChange={(event) => setSlideSize((size) => ({...size,width:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label><span>×</span><label>세로<input type="number" min="320" max="3840" value={slideSize.height} onChange={(event) => setSlideSize((size) => ({...size,height:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label></div></div>}</div></div></div>
+            <div className="editor-toolbar"><div className="editor-toolbar__left"><div className="editor-title-control" ref={titleControlRef}><svg className="editor-title-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round"/><path d="M13 14h5m-2-2 2 2-2 2" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>{titleEditOpen ? <input className="editor-document-title-input" aria-label="프레젠테이션 제목 편집" style={{width:`${Math.max(1, presentationTitle.length)}em`}} autoFocus value={presentationTitle} onChange={(event) => setPresentationTitle(event.target.value)} maxLength={80} onBlur={() => setTitleEditOpen(false)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === 'Escape') { event.preventDefault(); setTitleEditOpen(false); } }} /> : <button className="editor-document-title" type="button" aria-label="프레젠테이션 제목 수정" aria-expanded={titleEditOpen} onClick={() => setTitleEditOpen(true)}><span>{presentationTitle.trim() || '제목 없는 디자인'}</span></button>}</div><div className="editor-size-control" ref={sizeControlRef}><button className="editor-page-count" type="button" aria-label={`슬라이드 크기 ${slideSize.width} 곱하기 ${slideSize.height} 픽셀`} aria-expanded={sizeOpen} onClick={() => setSizeOpen((open) => !open)}><span>{slideSize.width}×{slideSize.height} px</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4.5 7.5 5.5 5 5.5-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button>{sizeOpen && <div className="editor-size-menu"><div className="editor-size-presets">{[{label:'16:9',width:1280,height:720},{label:'16:10',width:1280,height:800},{label:'4:3',width:1280,height:960},{label:'1:1',width:960,height:960}].map((preset) => <button type="button" key={preset.label} aria-pressed={slideSize.width===preset.width&&slideSize.height===preset.height} onClick={() => setSlideSize({width:preset.width,height:preset.height})}>{preset.label}</button>)}</div><div className="editor-size-custom"><label>가로<input type="number" min="320" max="3840" value={slideSize.width} onChange={(event) => setSlideSize((size) => ({...size,width:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label><span>×</span><label>세로<input type="number" min="320" max="3840" value={slideSize.height} onChange={(event) => setSlideSize((size) => ({...size,height:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label></div></div>}</div></div><div className="editor-toolbar-account"><span>{authUser?.email}</span><button type="button" onClick={() => void signOut()}>로그아웃</button></div></div>
             <div className="editor-stage">
               {previewError ? <div className="editor-canvas-message"><strong>미리보기를 열 수 없습니다</strong><span>{previewError}</span><button type="button" className="preview-retry" onClick={() => setPreviewRetry((value) => value + 1)}>다시 시도</button></div> : previewLoading && !prepared ? <div className="editor-canvas-message"><span className="preview-spinner" aria-hidden="true"/><strong>슬라이드를 불러오는 중</strong></div> : <div className="editor-page-stack" onScroll={(event) => { const cards = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[data-slide-index]')); const middle = event.currentTarget.getBoundingClientRect().top + event.currentTarget.clientHeight / 2; const nearest = cards.reduce((best, card) => Math.abs(card.getBoundingClientRect().top + card.offsetHeight / 2 - middle) < Math.abs(best.getBoundingClientRect().top + best.offsetHeight / 2 - middle) ? card : best, cards[0]); if (nearest) { setPreviewIndex(Number(nearest.dataset.slideIndex)); setSelectedTextSlide(null); } }}>
                 {(prepared?.thumbnails ?? []).map((thumbnail, slide) => { const position = slidePositions[slide] ?? prepared?.slides[slide]?.textPosition ?? { x: pptStyle.textX, y: pptStyle.textY, width: pptStyle.textWidth, height: pptStyle.textHeight }; const selectedText = selectedTextSlide === slide; return <div className={`editor-page-sheet ${previewIndex === slide ? 'is-current' : ''}`} data-slide-index={slide} key={slide} style={{aspectRatio:`${slideSize.width} / ${slideSize.height}`}}><img src={`data:image/png;base64,${thumbnail}`} alt="슬라이드 배경"/><div className="editor-slide-text" style={{left:`${position.x-position.width/2}%`,top:`${position.y-position.height/2}%`,width:`${position.width}%`,height:`${position.height}%`,fontFamily:pptStyle.fontFamily,fontSize:`${pptStyle.fontSize/960*100}cqw`,fontWeight:pptStyle.bold?700:400,color:slideTextColors[slide]??pptStyle.textColor,justifyContent:pptStyle.alignment==='LEFT'?'flex-start':pptStyle.alignment==='RIGHT'?'flex-end':'center',lineHeight:1.2}} onClick={() => { if (editingSlide !== slide) { setPreviewIndex(slide); setSelectedTextSlide(slide); } }} onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation(); setPreviewIndex(slide); setSelectedTextSlide(slide); setEditingSlide(slide); }} onPointerDown={(event) => { if (selectedText && editingSlide !== slide && !(event.target instanceof HTMLTextAreaElement)) startTextBoxInteraction(event, slide, position); }} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction} role="button" tabIndex={0} aria-label={`${slide+1}페이지 가사 텍스트 선택`} title="두 번 클릭하여 가사 수정">{editingSlide === slide ? <textarea className="editor-slide-textarea" autoFocus value={slideTextOverrides[slide] ?? prepared?.slides[slide]?.lines.join('\n') ?? ''} onChange={(event) => setSlideTextOverrides((items) => ({ ...items, [slide]: event.target.value }))} onPointerDown={(event) => event.stopPropagation()} onBlur={() => setEditingSlide(null)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setEditingSlide(null); } }} aria-label={`${slide+1}페이지 가사 편집`} /> : <span style={{display:'block',width:'100%',textAlign:pptStyle.alignment.toLowerCase() as CanvasTextAlign}}>{slideTextOverrides[slide] ?? prepared?.slides[slide]?.lines.join('\n')}</span>}</div>{selectedText && <div className="text-box-selection" style={{left:`${position.x-position.width/2}%`,top:`${position.y-position.height/2}%`,width:`${position.width}%`,height:`${position.height}%`}} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction} role="group" aria-label="가사 상자 위치와 크기 조절"><i className="text-box-handle text-box-handle--tl"/><i className="text-box-handle text-box-handle--tr"/><i className="text-box-handle text-box-handle--bl"/><button className="text-box-handle text-box-handle--br" type="button" aria-label="가사 상자 크기 조절" onPointerDown={(event) => startTextBoxInteraction(event, slide, position, 'resize')} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction}/></div>}<span className="editor-page-label">{slide + 1} 페이지</span><button className="editor-page-delete" type="button" aria-label={`${slide + 1}페이지 삭제`} onClick={() => { let original = 0; let visible = 0; while (visible < slide) { if (!removedSlideIndexes.includes(original)) visible += 1; original += 1; } while (removedSlideIndexes.includes(original)) original += 1; setRemovedSlideIndexes((indexes) => [...indexes, original]); setSlideTextOverrides({}); setSlidePositions({}); setSlideTextColors({}); setPreviewIndex(Math.max(0, slide - 1)); setSelectedTextSlide(null); setEditingSlide(null); }}>×</button></div>; })}
@@ -1071,7 +1165,7 @@ export function WorshipApp() {
               <div className="inspector-group"><h3>색상</h3><div className="style-grid"><label className="style-field"><span>배경</span><input type="color" value={pptStyle.backgroundColor} onChange={(event) => updateStyle({ backgroundColor: event.target.value })} /></label><label className="style-field"><span>글자</span><input type="color" value={slideTextColors[previewIndex] ?? pptStyle.textColor} onChange={(event) => setSlideTextColors((colors) => ({ ...colors, [previewIndex]: event.target.value }))} /></label></div></div>
               <div className="inspector-group"><h3>글자</h3><div className="style-grid"><div className="style-field style-field--wide font-picker"><span>글꼴</span><div className="font-search-glass"><input type="search" value={fontQuery} onFocus={() => setFontListOpen(true)} onChange={(event) => { setFontQuery(event.target.value); setFontListOpen(true); }} placeholder={pptStyle.fontFamily || '글꼴 검색'} aria-label="글꼴 검색" aria-expanded={fontListOpen}/><button type="button" aria-label="글꼴 목록 열기" onClick={() => setFontListOpen((open) => !open)}>⌄</button></div>{fontListOpen && <div className="font-options" role="listbox">{fontOptions.filter((font) => font.toLocaleLowerCase().includes(fontQuery.trim().toLocaleLowerCase())).map((font) => <button type="button" role="option" aria-selected={pptStyle.fontFamily === font} key={font} style={{fontFamily:font}} onClick={() => { updateStyle({fontFamily:font.includes('Malgun Gothic') ? 'Malgun Gothic' : font.includes('NanumGothic') ? 'NanumGothic' : font}); setFontQuery(''); setFontListOpen(false); }}>{font}</button>)}{fontQuery.trim() && !fontOptions.some((font) => font.toLocaleLowerCase() === fontQuery.trim().toLocaleLowerCase()) && <button type="button" role="option" onClick={() => { updateStyle({fontFamily:fontQuery.trim()}); setFontListOpen(false); }}>{fontQuery.trim()} 사용</button>}</div>}</div><label className="style-field"><span>크기</span><input type="number" min="16" max="100" value={pptStyle.fontSize || ''} onChange={(event) => updateStyle({ fontSize: Number(event.target.value) })} /></label><label className="style-field"><span>한 장의 줄 수</span><input type="number" min="1" max="6" value={pptStyle.linesPerSlide || ''} onChange={(event) => updateStyle({ linesPerSlide: Number(event.target.value) })} /></label><label className="style-field style-field--wide"><span>정렬</span><select value={pptStyle.alignment} onChange={(event) => updateStyle({ alignment: event.target.value as PptStyle['alignment'] })}><option value="LEFT">왼쪽</option><option value="CENTER">가운데</option><option value="RIGHT">오른쪽</option></select></label><div className="text-align-actions style-field--wide"><button type="button" onClick={() => { const fallback = prepared?.slides[previewIndex]?.textPosition ?? { x: 50, y: 50, width: pptStyle.textWidth, height: pptStyle.textHeight }; setSlidePositions((items) => ({ ...items, [previewIndex]: { ...(items[previewIndex] ?? fallback), x: 50, y: 50 } })); setPptStyle((style) => ({ ...style, alignment: 'CENTER' })); }}>가운데 정렬</button></div><label className="style-check"><input type="checkbox" checked={pptStyle.bold} onChange={(event) => updateStyle({ bold: event.target.checked })} /> 굵게</label></div></div>
               {pptStyle.fontSize * pptStyle.linesPerSlide * 1.2 > 300 && <p className="style-hint">글자 크기와 줄 수가 크면 가사가 잘릴 수 있습니다.</p>}
-              <div className="inspector-group"><h3>배경 이미지</h3><label className="file-field"><span className="file-picker-button">이미지 선택</span><input key={imageInputKey} type="file" accept="image/png,image/jpeg" onChange={chooseBackground} /><small>{backgroundImage ? backgroundImage.name : 'PNG 또는 JPEG · 최대 5MB'}</small></label>{backgroundImage && <button type="button" className="clear-image" onClick={() => { setBackgroundImage(null); setImageInputKey((key) => key + 1); }}>배경 이미지 제거</button>}</div>
+              <div className="inspector-group"><h3>배경 이미지</h3><div className={`image-drop-zone${backgroundDropActive ? ' is-drag-over' : ''}`} onDragEnter={(event) => { event.preventDefault(); setBackgroundDropActive(true); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setBackgroundDropActive(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setBackgroundDropActive(false); }} onDrop={(event) => { event.preventDefault(); setBackgroundDropActive(false); applyBackgroundFile(event.dataTransfer.files[0]); }}><label className="file-field"><span className="file-picker-button">이미지 선택</span><input key={imageInputKey} type="file" accept="image/png,image/jpeg" onChange={chooseBackground} /><small>{backgroundImage ? backgroundImage.name : '이미지를 끌어 놓거나 선택하세요 · PNG/JPEG, 최대 5MB'}</small></label></div>{backgroundImage && <button type="button" className="clear-image" onClick={() => { setBackgroundImage(null); setImageInputKey((key) => key + 1); }}>배경 이미지 제거</button>}</div>
               <div className="inspector-group"><h3>기존 PPT</h3><label className="file-field"><span className="file-picker-button">PPTX 선택</span><input type="file" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" onChange={(event) => setExistingPpt(event.target.files?.[0] ?? null)} /><small>{existingPpt ? `${existingPpt.name} · 기존 슬라이드 뒤에 추가` : '최대 20MB · 새 슬라이드에 디자인 적용'}</small></label></div>
               {pptNotice && <p className={`notice ${pptNotice.kind ?? ''}`} role="status" aria-live="polite">{pptNotice.text}</p>}
             </div>

@@ -13,7 +13,8 @@
   },
   "ratelimits": [
     { "name": "API_LIMIT", "namespace_id": "20261112", "simple": { "limit": 120, "period": 60 } },
-    { "name": "REQUEST_LIMIT", "namespace_id": "20261113", "simple": { "limit": 10, "period": 60 } }
+    { "name": "REQUEST_LIMIT", "namespace_id": "20261113", "simple": { "limit": 10, "period": 60 } },
+    { "name": "AUTH_LIMIT", "namespace_id": "20261117", "simple": { "limit": 10, "period": 60 } }
   ],
   "d1_databases": [{ "binding": "DB", "database_name": "yebit-test", "database_id": "2e2e4878-ec26-477c-9da8-4cb919ccd2d3", "remote": true }]
 }

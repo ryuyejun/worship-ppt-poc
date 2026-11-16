@@ -3,6 +3,20 @@ import type { PresentationInput } from './presentation';
 
 export const cloudflareMode = import.meta.env.VITE_BACKEND !== 'legacy';
 
+let authRefreshPromise: Promise<boolean> | null = null;
+
+async function refreshAuthSession(): Promise<boolean> {
+  if (!authRefreshPromise) {
+    authRefreshPromise = fetch('/auth/refresh', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    }).then((response) => response.ok).catch(() => false).finally(() => { authRefreshPromise = null; });
+  }
+  return authRefreshPromise;
+}
+
 export async function api<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<{ data: T; headers: Headers }> {
   if (cloudflareMode && (path === '/ppt/preview' || path === '/ppt/batch')) {
     const { collectSlides, makePresentation, renderSlide } = await import('./presentation');
@@ -15,8 +29,9 @@ export async function api<T>(path: string, body?: unknown, signal?: AbortSignal)
     const imageBase64 = await renderSlide(slides[slideIndex], input.style, 1280, input.slideSize);
     return { data: { imageBase64, slideIndex, slideCount: slides.length } as T, headers: new Headers() };
   }
-  const response = await fetch(path, {
+  const send = () => fetch(path, {
     method: 'POST',
+    credentials: 'same-origin',
     headers: {
       'Content-Type': 'application/json',
       'X-Local-Token': window.LOCAL_ACCESS_TOKEN ?? '',
@@ -24,6 +39,8 @@ export async function api<T>(path: string, body?: unknown, signal?: AbortSignal)
     body: JSON.stringify(body ?? {}),
     signal,
   });
+  let response = await send();
+  if (response.status === 401 && !path.startsWith('/auth/') && await refreshAuthSession()) response = await send();
   if (!response.ok) {
     let message = '요청을 처리하지 못했습니다.';
     try {

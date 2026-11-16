@@ -2,6 +2,7 @@ import { listSongs, searchSongs, getSong, queueMissing } from './songs.mjs';
 import { findArtwork, getArtworkImage } from './artwork.mjs';
 import { refreshYoutubeStatistics } from './youtube-statistics.mjs';
 import { matchSongVideos } from './song-video-match.mjs';
+import { handleAuthRequest, verifyAccessCookie } from './auth.mjs';
 
 const json = (body, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
 const fail = (message, status) => json({ success: false, data: null, error: message }, status);
@@ -230,6 +231,11 @@ export default {
         return image ? new Response(image.bytes, { headers: { 'Content-Type': image.type, 'Cache-Control': 'public, max-age=86400', 'X-Content-Type-Options': 'nosniff' } }) : new Response(null, { status: 404 });
       } catch { return new Response(null, { status: 500 }); }
     }
+    if (path.startsWith('/auth/')) {
+      if (path !== '/auth/me' && env.AUTH_LIMIT && !(await env.AUTH_LIMIT.limit({ key: request.headers.get('CF-Connecting-IP') || 'unknown' })).success) return fail('인증 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.', 429);
+      try { return await handleAuthRequest(request, env, path); }
+      catch { return fail('인증 요청을 처리하지 못했습니다.', 500); }
+    }
     if (!routes.has(path)) {
       if (path === '/batch-import' || path === '/requests/complete') return fail('웹에서 곡을 변경하는 기능은 아직 사용할 수 없습니다.', 403);
       if (env.ASSETS && request.method === 'GET') return env.ASSETS.fetch(request);
@@ -237,6 +243,8 @@ export default {
     }
     if (request.method !== 'POST') return fail('지원하지 않는 요청입니다.', 405);
     try {
+      const user = await verifyAccessCookie(request, env);
+      if (!user) return fail('로그인이 필요합니다.', 401);
       if (env.API_LIMIT && !(await env.API_LIMIT.limit({ key: request.headers.get('CF-Connecting-IP') || 'unknown' })).success) return fail('요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.', 429);
       const text = await readInput(request);
       if (text === null) return fail('요청이 너무 큽니다.', 413);
