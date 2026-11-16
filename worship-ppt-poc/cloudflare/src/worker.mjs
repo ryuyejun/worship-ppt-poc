@@ -78,7 +78,10 @@ function extractLyrics(description) {
   }
   if (current.length) blocks.push(current);
   const best = blocks.sort((left, right) => right.filter(Boolean).length - left.filter(Boolean).length)[0] || [];
-  return best.filter(Boolean).length >= 5 ? best.join('\n').trim() : '';
+  const lyrics = best.filter(Boolean).join('\n').trim();
+  const lines = lyrics.split('\n').map(line => line.trim()).filter(Boolean);
+  const textLength = (lyrics.match(/[가-힣A-Za-z]/g) || []).length;
+  return lines.length >= 5 && textLength >= 40 ? lyrics : '';
 }
 
 async function searchYouTubeLyrics(title, apiKey) {
