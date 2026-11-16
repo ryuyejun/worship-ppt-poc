@@ -10,8 +10,8 @@ export function matchSongVideos(videos, songs) {
   for (const video of videos) {
     if (typeof video.videoTitle !== 'string') continue;
     const text = normalize(video.videoTitle);
-    const segments = [text, ...text.split(/\s*(?:\||\/|–|—|:|·|•|\s-\s)\s*/u)];
-    const match = titles.find(({ key }) => segments.some(segment => segment.startsWith(key) && (segment.length === key.length || /[\s([{【]/u.test(segment[key.length]))));
+    const firstTitleSegment = text.split(/\s*(?:\||\/|–|—|:|·|•|\s-\s)\s*/u)[0];
+    const match = titles.find(({ key }) => firstTitleSegment.startsWith(key) && (firstTitleSegment.length === key.length || /[\s([{【]/u.test(firstTitleSegment[key.length])));
     if (!match) continue;
     const candidate = { videoId: video.videoId, songId: match.songId, title: match.title, views: video.views, likes: video.likes, fetchedAt: video.fetchedAt };
     const previous = matches.get(match.key);
