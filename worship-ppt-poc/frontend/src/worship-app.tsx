@@ -4,7 +4,7 @@ import type { Song, SongRequest } from './types';
 import { collectSlides, renderSlide, type Slide, type SlideSize, type SlideStyle, type SlideTextPosition } from './presentation';
 
 type Notice = { text: string; kind?: 'error' | 'success' } | null;
-type RecentSong = { id: number; title: string; artist: string | null; selectedAt: number; lyrics?: string; source?: string | null; artworkUrl?: string; artworkSourceUrl?: string; artworkContributor?: string };
+type RecentSong = { id: number; title: string; artist: string | null; selectedAt: number; lyrics?: string; source?: string | null; youtubeVideoId?: string; artworkUrl?: string; artworkSourceUrl?: string; artworkContributor?: string };
 type SongArtwork = { available: boolean; songId: number; imageUrl: string | null; sourceUrl: string | null; contributor: string | null };
 type FavoriteArtwork = { imageUrl: string; sourceUrl?: string; contributor?: string };
 type PptStyle = {
@@ -27,6 +27,21 @@ function uniqueRecentSongs(songs: RecentSong[]) {
     seen.add(key);
     return true;
   });
+}
+
+function youtubeThumbnailUrl(videoId?: string | null) {
+  return videoId && /^[A-Za-z0-9_-]{11}$/.test(videoId) ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : undefined;
+}
+
+function youtubeVideoIdFromUrl(url?: string | null) {
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    const videoId = parsed.hostname === 'youtu.be' ? parsed.pathname.slice(1) : parsed.searchParams.get('v');
+    return videoId && /^[A-Za-z0-9_-]{11}$/.test(videoId) ? videoId : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 const fontOptions = ['Apple SD Gothic Neo', '맑은 고딕 (Malgun Gothic)', 'Pretendard', 'Noto Sans KR', '나눔고딕 (NanumGothic)', 'Noto Serif KR'];
@@ -203,19 +218,21 @@ export function WorshipApp() {
 
   useEffect(() => {
     for (const recent of recentSongs) {
-      if (!recent.artworkUrl) requestSongArtwork(recent);
+      const videoId = recent.youtubeVideoId || youtubeVideos.find((video) => video.songId === recent.id)?.videoId;
+      if (!recent.artworkUrl && !videoId) requestSongArtwork(recent);
     }
-  }, [recentSongs]);
+  }, [recentSongs, youtubeVideos]);
 
   useEffect(() => {
     for (const song of favoriteSongs) {
-      if (!favoriteArtwork[song.id]) requestSongArtwork(song);
+      const hasYoutubeThumbnail = youtubeVideos.some((video) => video.songId === song.id);
+      if (!favoriteArtwork[song.id] && !hasYoutubeThumbnail) requestSongArtwork(song);
     }
-  }, [favoriteSongs, favoriteArtwork]);
+  }, [favoriteSongs, favoriteArtwork, youtubeVideos]);
 
   useEffect(() => {
     for (const song of youtubeVideos) {
-      if (song.songId > 0 && !favoriteArtwork[song.songId]) {
+      if (song.songId > 0 && !favoriteArtwork[song.songId] && !song.artworkUrl) {
         requestSongArtwork({ id: song.songId, title: song.title });
       }
     }
@@ -242,9 +259,15 @@ export function WorshipApp() {
     setEditorTab('songs');
     if (closeSearch) setSearchOpen(false);
     artworkAttempts.current.delete(`${song.id}:${song.title}`);
+    const matchedVideoId = trendingVideoId || youtubeVideoIdFromUrl(song.source)
+      || youtubeVideos.find((video) => video.songId === song.id)?.videoId;
+    const thumbnailUrl = youtubeThumbnailUrl(matchedVideoId);
+    if (thumbnailUrl && song.id > 0) {
+      setFavoriteArtwork((items) => ({ ...items, [song.id]: { imageUrl: thumbnailUrl } }));
+    }
     const titleKey = recentTitleKey(song.title);
     setRecentSongs((songs) => uniqueRecentSongs([
-      { ...songs.find((recent) => recentTitleKey(recent.title) === titleKey), id: song.id, title: song.title, artist: song.artist, selectedAt: Date.now(), ...(song.id < 0 && song.lyrics ? { lyrics: song.lyrics, source: song.source } : {}) },
+      { ...songs.find((recent) => recentTitleKey(recent.title) === titleKey), id: song.id, title: song.title, artist: song.artist, selectedAt: Date.now(), ...(matchedVideoId ? { youtubeVideoId: matchedVideoId, artworkUrl: thumbnailUrl, artworkSourceUrl: undefined, artworkContributor: undefined } : {}), ...(song.id < 0 && song.lyrics ? { lyrics: song.lyrics, source: song.source } : {}) },
       ...songs.filter((recent) => recentTitleKey(recent.title) !== titleKey),
     ]).slice(0, 5));
   }
@@ -875,18 +898,18 @@ export function WorshipApp() {
               {editorTab === 'songs' ? <div className="editor-control-group">
                 {recentSongs.length > 0 && <section className="recent-song-section" aria-label="최근 선택한 곡">
                   <div className="editor-heading"><h2>최근 선택한 곡</h2></div>
-                  <div className="recent-song-list">{recentSongs.slice(0, 5).map((recent) => <div className="recent-song-card-shell" key={`${recent.id}:${recent.title}`}><div className="recent-song-card">{recent.artworkUrl && <img className="recent-song-card__image" src={recent.artworkUrl} alt="" />}<span className="recent-song-card__glass"><button className="recent-song-card__title" type="button" onClick={() => void openRecentSong(recent)}><strong>{recent.title}</strong></button><span className="recent-song-card__meta"><small>최근 선택 · {new Date(recent.selectedAt).toLocaleDateString('ko-KR')}</small>{recent.artworkSourceUrl && <a href={recent.artworkSourceUrl} target="_blank" rel="noreferrer">Pixabay · {recent.artworkContributor || '이미지 출처'}</a>}</span></span></div></div>)}</div>
+                  <div className="recent-song-list">{recentSongs.slice(0, 5).map((recent) => { const videoId = recent.youtubeVideoId || youtubeVideos.find((video) => video.songId === recent.id)?.videoId; const imageUrl = youtubeThumbnailUrl(videoId) || recent.artworkUrl; return <div className="recent-song-card-shell" key={`${recent.id}:${recent.title}`}><div className="recent-song-card">{imageUrl && <img className="recent-song-card__image" src={imageUrl} alt="" />}<span className="recent-song-card__glass"><button className="recent-song-card__title" type="button" onClick={() => void openRecentSong(recent)}><strong>{recent.title}</strong></button><span className="recent-song-card__meta"><small>최근 선택 · {new Date(recent.selectedAt).toLocaleDateString('ko-KR')}</small>{!videoId && recent.artworkSourceUrl && <a href={recent.artworkSourceUrl} target="_blank" rel="noreferrer">Pixabay · {recent.artworkContributor || '이미지 출처'}</a>}</span></span></div></div>; })}</div>
                 </section>}
                 {activeSong && <article className="song-detail" aria-live="polite"><div className="detail-title"><div><p className="eyebrow">선택한 찬양</p><h3>{activeSong.title}</h3></div><div className="detail-actions">{activeSong.id > 0 && <button className={`favorite-toggle${favoriteIds.includes(activeSong.id) ? ' is-favorite' : ''}`} type="button" onClick={() => toggleFavorite(activeSong)} aria-label={favoriteIds.includes(activeSong.id) ? '즐겨찾기 해제' : '즐겨찾기 추가'}>{favoriteIds.includes(activeSong.id) ? '★' : '☆'}</button>}<button className="icon-button" onClick={() => setActiveSong(null)} aria-label="선택한 곡 닫기">×</button></div></div><dl className="song-meta"><div><dt>작사</dt><dd>{displayPerson(activeSong.author)}</dd></div><div><dt>작곡</dt><dd>{displayPerson(activeSong.composer)}</dd></div><div><dt>공연팀</dt><dd>{displayPerson(activeSong.artist)}</dd></div></dl><div className="lyrics-preview"><span>가사 미리보기</span><p>{activeSong.lyrics?.trim() ? <>{activeSong.id < 0 ? activeSong.lyrics.trim() : activeSong.lyrics.trim().slice(0, 520)}{activeSong.id > 0 && activeSong.lyrics.length > 520 ? '…' : ''}</> : lyricsLoadingSongId === activeSong.id ? '가사를 불러오는 중입니다.' : lyricsLoadError?.songId === activeSong.id ? lyricsLoadError.message : '이 곡은 아직 가사가 등록되어 있지 않습니다.'}</p></div>{activeSong.id < 0 && <p className="editor-hint">{activeSong.source?.includes('youtube.com') ? 'YouTube 영상 설명란에서 찾은 가사 후보입니다. 곡과 가사를 확인한 뒤 사용해 주세요. DB에는 저장되지 않습니다.' : 'LRCLIB 제공 가사입니다. 곡과 가사를 확인하고 이용 권한이 있는 경우에 사용해 주세요. DB에는 저장되지 않습니다.'}</p>}<button className="btn btn--secondary add-button" onClick={() => addSelection(activeSong)}>제작 목록에 추가</button></article>}
                 {selected.length > 0 && <section ref={selectedQueueRef} className="editor-selected-queue" aria-labelledby="editor-selected-title"><div className="editor-heading"><h2 id="editor-selected-title">제작 목록</h2><span>{selected.length}곡</span></div><ol className="selected-list">{selected.map((song, index) => <li key={song.id}><span className="selected-index">{String(index + 1).padStart(2, '0')}</span><span className="selected-song"><strong>{song.title}</strong><small>{displayPerson(song.author)}</small></span><div className="selected-actions"><button type="button" onClick={() => moveSong(index, -1)} disabled={index === 0} aria-label={`${song.title} 위로`}>↑</button><button type="button" onClick={() => moveSong(index, 1)} disabled={index === selected.length - 1} aria-label={`${song.title} 아래로`}>↓</button><button type="button" onClick={() => { setRemovedSlideIndexes([]); setSelected((items) => items.filter((item) => item.id !== song.id)); }} aria-label={`${song.title} 제거`}>×</button></div></li>)}</ol></section>}
               </div> : editorTab === 'favorites' ? <div className="editor-control-group">
                 <div className="editor-heading"><h2>즐겨찾기</h2><span>{favoriteSongs.length}곡</span></div>
-                {loadingSongs ? <div className="editor-library-empty"><strong>곡 목록을 확인하고 있습니다</strong></div> : !libraryError && (favoriteSongs.length === 0 ? <div className="editor-library-empty"><strong>즐겨찾는 곡이 없습니다</strong><span>곡 검색 결과에서 별표를 눌러 추가하세요.</span></div> : <div className="editor-favorite-list">{favoriteSongs.map((song) => { const artwork = favoriteArtwork[song.id]; return <div className="recent-song-card favorite-artwork-row" key={song.id}>{artwork?.imageUrl && <img className="recent-song-card__image" src={artwork.imageUrl} alt="" />}<span className="recent-song-card__glass favorite-artwork-glass"><button className="recent-song-card__title" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong></button><span className="recent-song-card__meta"><small>{song.category?.toUpperCase() === 'HYMN' && song.hymnNumber ? `새찬송가 ${song.hymnNumber}장` : displayKnown(song.artist) || '즐겨찾기 곡'}</small>{artwork?.sourceUrl && <a href={artwork.sourceUrl} target="_blank" rel="noreferrer">Pixabay · {artwork.contributor || '이미지 출처'}</a>}</span></span><button className="favorite-toggle is-favorite favorite-artwork-toggle" type="button" onClick={() => toggleFavorite(song)} aria-label={`${song.title} 즐겨찾기 해제`}>★</button></div>; })}</div>)}
+                {loadingSongs ? <div className="editor-library-empty"><strong>곡 목록을 확인하고 있습니다</strong></div> : !libraryError && (favoriteSongs.length === 0 ? <div className="editor-library-empty"><strong>즐겨찾는 곡이 없습니다</strong><span>곡 검색 결과에서 별표를 눌러 추가하세요.</span></div> : <div className="editor-favorite-list">{favoriteSongs.map((song) => { const artwork = favoriteArtwork[song.id]; const videoId = youtubeVideos.find((video) => video.songId === song.id)?.videoId; const imageUrl = youtubeThumbnailUrl(videoId) || artwork?.imageUrl; return <div className="recent-song-card favorite-artwork-row" key={song.id}>{imageUrl && <img className="recent-song-card__image" src={imageUrl} alt="" />}<span className="recent-song-card__glass favorite-artwork-glass"><button className="recent-song-card__title" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong></button><span className="recent-song-card__meta"><small>{song.category?.toUpperCase() === 'HYMN' && song.hymnNumber ? `새찬송가 ${song.hymnNumber}장` : displayKnown(song.artist) || '즐겨찾기 곡'}</small>{!videoId && artwork?.sourceUrl && <a href={artwork.sourceUrl} target="_blank" rel="noreferrer">Pixabay · {artwork.contributor || '이미지 출처'}</a>}</span></span><button className="favorite-toggle is-favorite favorite-artwork-toggle" type="button" onClick={() => toggleFavorite(song)} aria-label={`${song.title} 즐겨찾기 해제`}>★</button></div>; })}</div>)}
               </div> : null}
               <div className={`editor-control-group trend-panel${editorTab === 'trending' ? ' is-visible' : ' is-preloaded'}`} aria-hidden={editorTab !== 'trending'}>
                 <div className="editor-heading"><h2>찬양 곡</h2><span>{youtubeVideos.length}곡</span></div>
                 <p className="trend-source-note">일치한 영상 조회수 기준 상위 30곡 · 주 1회 갱신 · 여러 곡이 담긴 영상은 영상 전체 통계</p>
-                {youtubeStatus === 'loading' ? <p className="trend-source-note">곡 정보를 불러오는 중입니다.</p> : youtubeStatus === 'error' ? <p className="trend-source-note">곡 정보를 불러오지 못했습니다.</p> : youtubeVideos.length ? <ul className="local-trend-list">{youtubeVideos.map((video, index) => <li key={video.videoId}><span className="local-trend-rank" aria-label={`${index + 1}번째 곡`}>{index + 1}</span><button type="button" className="local-trend-song" onClick={() => void openTrendingSong(video.songId)}>{(favoriteArtwork[video.songId]?.imageUrl || video.artworkUrl) && <img className="local-trend-artwork" src={favoriteArtwork[video.songId]?.imageUrl || video.artworkUrl || undefined} alt="" />}<span className="local-trend-song__text"><strong>{video.title}</strong></span></button></li>)}</ul> : <div className="editor-library-empty"><strong>일치하는 곡이 없습니다</strong><span>확인된 곡이 있으면 여기에 표시됩니다.</span></div>}
+                {youtubeStatus === 'loading' ? <p className="trend-source-note">곡 정보를 불러오는 중입니다.</p> : youtubeStatus === 'error' ? <p className="trend-source-note">곡 정보를 불러오지 못했습니다.</p> : youtubeVideos.length ? <ul className="local-trend-list">{youtubeVideos.map((video, index) => <li key={video.videoId}><span className="local-trend-rank" aria-label={`${index + 1}번째 곡`}>{index + 1}</span><button type="button" className="local-trend-song" onClick={() => void openTrendingSong(video.songId)}>{(youtubeThumbnailUrl(video.videoId) || video.artworkUrl) && <img className="local-trend-artwork" src={youtubeThumbnailUrl(video.videoId) || video.artworkUrl || undefined} alt="" />}<span className="local-trend-song__text"><strong>{video.title}</strong></span></button></li>)}</ul> : <div className="editor-library-empty"><strong>일치하는 곡이 없습니다</strong><span>확인된 곡이 있으면 여기에 표시됩니다.</span></div>}
               </div>
             </div>
           </aside>
