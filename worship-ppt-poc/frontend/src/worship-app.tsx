@@ -106,6 +106,7 @@ export function WorshipApp() {
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState('');
+  const [authFieldErrors, setAuthFieldErrors] = useState<{ email?: string; password?: string }>({});
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [page, setPage] = useState<'create' | 'manage'>(window.location.hash === '#manage' ? 'manage' : 'create');
   const [navOpen, setNavOpen] = useState(false);
@@ -914,11 +915,24 @@ export function WorshipApp() {
 
   async function submitAuth(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setAuthSubmitting(true);
     setAuthError('');
+    const fieldErrors: { email?: string; password?: string } = {};
+    const normalizedEmail = authEmail.trim();
+    if (!normalizedEmail) fieldErrors.email = '이메일 주소를 입력해 주세요.';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) fieldErrors.email = '이메일 주소 형식을 확인해 주세요.';
+    if (!authPassword) fieldErrors.password = '비밀번호를 입력해 주세요.';
+    else if (authMode === 'signup' && authPassword.length < 10) fieldErrors.password = '비밀번호를 10자 이상 입력해 주세요.';
+    if (Object.keys(fieldErrors).length > 0) {
+      setAuthFieldErrors(fieldErrors);
+      const invalidField = fieldErrors.email ? 'input[name="email"]' : 'input[name="password"]';
+      event.currentTarget.querySelector<HTMLInputElement>(invalidField)?.focus();
+      return;
+    }
+    setAuthFieldErrors({});
+    setAuthSubmitting(true);
     try {
       const path = authMode === 'signup' ? '/auth/signup' : '/auth/login';
-      const result = await authRequest<{ user: { id: number; email: string } }>(path, 'POST', { email: authEmail, password: authPassword });
+      const result = await authRequest<{ user: { id: number; email: string } }>(path, 'POST', { email: normalizedEmail, password: authPassword });
       setAuthUser(result.user);
       setAuthPassword('');
       setAuthStatus('authenticated');
@@ -1056,10 +1070,9 @@ export function WorshipApp() {
             <h1 id="auth-title">{authStatus === 'checking' ? '로그인 상태를 확인하고 있습니다' : authMode === 'login' ? '로그인' : '회원가입'}</h1>
             {authStatus === 'checking' ? <p className="auth-help">잠시만 기다려 주세요.</p> : <>
               <p className="auth-form-intro">{authMode === 'login' ? '계정에 로그인해 계속 이용하세요.' : '이메일로 Yebit 계정을 만들어 보세요.'}</p>
-              <form className="auth-form" onSubmit={submitAuth}>
-                <label>이메일<input type="email" autoComplete="email" required maxLength={254} value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="이메일 주소" /></label>
-                <label>비밀번호<input type="password" autoComplete={authMode === 'login' ? 'current-password' : 'new-password'} required minLength={10} maxLength={128} value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} placeholder={authMode === 'signup' ? '10자 이상 입력' : '비밀번호'} /></label>
-                {authMode === 'signup' && authPassword.length > 0 && authPassword.length < 10 && <p className="auth-password-hint" role="status" aria-live="polite">비밀번호를 10자 이상 입력해 주세요. ({authPassword.length}/10)</p>}
+              <form className="auth-form" noValidate onSubmit={submitAuth}>
+                <label>이메일<input type="email" name="email" autoComplete="email" required maxLength={254} value={authEmail} onChange={(event) => { setAuthEmail(event.target.value); setAuthFieldErrors((errors) => ({ ...errors, email: undefined })); setAuthError(''); }} placeholder="이메일 주소" aria-invalid={Boolean(authFieldErrors.email)} aria-describedby={authFieldErrors.email ? 'auth-email-error' : undefined} />{authFieldErrors.email && <span id="auth-email-error" className="auth-field-error" role="status">{authFieldErrors.email}</span>}</label>
+                <label>비밀번호<input type="password" name="password" autoComplete={authMode === 'login' ? 'current-password' : 'new-password'} required minLength={authMode === 'signup' ? 10 : undefined} maxLength={128} value={authPassword} onChange={(event) => { setAuthPassword(event.target.value); setAuthFieldErrors((errors) => ({ ...errors, password: undefined })); setAuthError(''); }} placeholder={authMode === 'signup' ? '10자 이상 입력' : '비밀번호'} aria-invalid={Boolean(authFieldErrors.password)} aria-describedby={authFieldErrors.password ? 'auth-password-error' : authMode === 'signup' && authPassword.length > 0 && authPassword.length < 10 ? 'auth-password-hint' : undefined} />{authFieldErrors.password ? <span id="auth-password-error" className="auth-field-error" role="status">{authFieldErrors.password}</span> : authMode === 'signup' && authPassword.length > 0 && authPassword.length < 10 && <span id="auth-password-hint" className="auth-password-hint" role="status" aria-live="polite">비밀번호를 10자 이상 입력해 주세요. ({authPassword.length}/10)</span>}</label>
                 {authError && <p className="auth-error" role="alert">{authError}</p>}
                 <button className="auth-submit" type="submit" disabled={authSubmitting}>{authSubmitting ? '처리 중…' : authMode === 'login' ? '로그인' : '회원가입'}</button>
               </form>
@@ -1072,7 +1085,7 @@ export function WorshipApp() {
             <h2>{authMode === 'login' ? '환영합니다' : '다시 만나 반가워요'}</h2>
             <span>{authMode === 'login' ? '계정을 만들고 예배 찬양을 위한 PPT를 준비해 보세요.' : '로그인하고 이어서 찬양 PPT를 준비하세요.'}</span>
           </div>
-          <button type="button" className="auth-mode-toggle" onClick={() => { setAuthMode((mode) => mode === 'login' ? 'signup' : 'login'); setAuthError(''); setAuthPassword(''); }} disabled={authStatus === 'checking'}>{authMode === 'login' ? '회원가입' : '로그인'}</button>
+          <button type="button" className="auth-mode-toggle" onClick={() => { setAuthMode((mode) => mode === 'login' ? 'signup' : 'login'); setAuthError(''); setAuthFieldErrors({}); setAuthPassword(''); }} disabled={authStatus === 'checking'}>{authMode === 'login' ? '회원가입' : '로그인'}</button>
         </aside>
       </section>
     </main>;
