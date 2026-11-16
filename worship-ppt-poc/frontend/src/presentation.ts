@@ -19,7 +19,7 @@ export function splitLyrics(lyrics: string, perSlide: number): string[][] {
 }
 
 export async function collectSlides(input: PresentationInput, signal?: AbortSignal): Promise<Slide[]> {
-  if (!Array.isArray(input.songIds) || !input.songIds.length || input.songIds.length > 100) throw new Error('곡을 1곡 이상 100곡 이하로 선택하세요.');
+  if (!Array.isArray(input.songIds) || input.songIds.length > 100) throw new Error('곡은 100곡 이하로 선택하세요.');
   if (input.pptxBase64) throw new Error('기존 PPTX에 추가하는 기능은 Cloudflare 전환 중입니다. 새 PPTX로 만들어 주세요.');
   const external = new Map((input.externalSongs || []).map(song => [song.id, song]));
   const songs = await Promise.all(input.songIds.map(async id => {
@@ -37,8 +37,8 @@ export async function collectSlides(input: PresentationInput, signal?: AbortSign
     return { id, title: song.title, artist: song.artist, lyrics: song.lyrics };
   }));
   const slides = songs.flatMap(song => splitLyrics(song.lyrics, input.style.linesPerSlide).map(lines => ({ title: song.title, lines })));
-  if (!slides.length) throw new Error('표시할 가사 줄이 없습니다.');
   const extraSlides = Math.max(0, Math.min(100, Math.floor(input.extraSlides ?? 0)));
+  if (!slides.length) slides.push({ title: '', lines: [] });
   slides.push(...Array.from({ length: extraSlides }, () => ({ title: '', lines: [] })));
   return slides;
 }

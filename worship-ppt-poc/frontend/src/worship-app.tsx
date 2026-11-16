@@ -313,7 +313,6 @@ export function WorshipApp() {
 
   useEffect(() => {
     const controller = new AbortController();
-    if (!selected.length) { setPrepared(null); setPreview(null); previewCache.current.clear(); setPreviewLoading(false); setPreviewError(''); return; }
     if (!validStyle) { setPreviewLoading(false); setPreviewError('글꼴과 글자 크기, 줄 수를 확인해 주세요.'); return; }
     if (existingPpt && (!existingPpt.name.toLowerCase().endsWith('.pptx') || existingPpt.size > 20_000_000)) {
       setPreviewLoading(false); setPreviewError('20MB 이하의 PPTX 파일을 선택해 주세요.'); return;
@@ -553,10 +552,6 @@ export function WorshipApp() {
   }
 
   async function createPpt() {
-    if (!selected.length) {
-      setPptNotice({ text: '가사가 저장된 곡을 먼저 추가해 주세요.', kind: 'error' });
-      return;
-    }
     if (existingPpt && (!existingPpt.name.toLowerCase().endsWith('.pptx') || existingPpt.size > 20_000_000)) {
       setPptNotice({ text: '20MB 이하의 PPTX 파일을 선택해 주세요.', kind: 'error' });
       return;
@@ -701,7 +696,7 @@ export function WorshipApp() {
             </div>
             <div className="editor-filmstrip" aria-label="슬라이드 페이지">
               {Array.from({ length: preview?.slideCount ?? 0 }, (_, slide) => <button className={`filmstrip-page ${preview?.slideIndex === slide ? 'is-active' : ''}`} type="button" key={slide} onClick={() => setPreviewIndex(slide)} disabled={!preview} aria-label={`${slide + 1}번 슬라이드 미리보기`} aria-current={preview?.slideIndex === slide ? 'page' : undefined}><span className="filmstrip-canvas">{prepared?.thumbnails[slide] && <img src={`data:image/png;base64,${prepared.thumbnails[slide]}`} alt="" />}</span><span className="filmstrip-number">{slide + 1}</span></button>)}
-              {preview && <button className="filmstrip-add" type="button" onClick={() => { setExtraSlideCount((count) => count + 1); setPreviewIndex(preview.slideCount); }} aria-label="페이지 추가"><span aria-hidden="true">＋</span><small>페이지 추가</small></button>}
+              <button className="filmstrip-add" type="button" onClick={() => { const nextIndex = preview?.slideCount ?? 1; setExtraSlideCount((count) => count + 1); setPreviewIndex(nextIndex); }} aria-label="페이지 추가"><span aria-hidden="true">＋</span><small>페이지 추가</small></button>
             </div>
           </section>
           <aside className="editor-inspector" aria-label="슬라이드 편집">
@@ -715,7 +710,7 @@ export function WorshipApp() {
               <div className="inspector-group"><h3>기존 PPT</h3><label className="file-field"><span className="file-picker-button">PPTX 선택</span><input type="file" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" onChange={(event) => setExistingPpt(event.target.files?.[0] ?? null)} /><small>{existingPpt ? `${existingPpt.name} · 기존 슬라이드 뒤에 추가` : '최대 20MB · 새 슬라이드에 디자인 적용'}</small></label></div>
               {pptNotice && <p className={`notice ${pptNotice.kind ?? ''}`} role="status" aria-live="polite">{pptNotice.text}</p>}
             </div>
-            <div className="inspector-footer"><button className="editor-queue-link" type="button" onClick={() => { setEditorTab('songs'); window.requestAnimationFrame(() => selectedQueueRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })); }} aria-label={`제작 목록, ${selected.length}곡 · ${preview?.slideCount ?? 0}장`}>{selected.length}곡 · {preview?.slideCount ?? 0}장 <span>제작 목록</span></button><button className="btn btn--primary" type="button" onClick={createPpt} disabled={creating || !selected.length}>{creating ? '만드는 중…' : 'PPTX 다운로드'}</button></div>
+            <div className="inspector-footer"><button className="editor-queue-link" type="button" onClick={() => { setEditorTab('songs'); window.requestAnimationFrame(() => selectedQueueRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })); }} aria-label={`제작 목록, ${selected.length}곡 · ${preview?.slideCount ?? 1}장`}>{selected.length}곡 · {preview?.slideCount ?? 1}장 <span>제작 목록</span></button><button className="btn btn--primary" type="button" onClick={createPpt} disabled={creating}>{creating ? '만드는 중…' : 'PPTX 다운로드'}</button></div>
           </aside>
         </main>
       ) : (
