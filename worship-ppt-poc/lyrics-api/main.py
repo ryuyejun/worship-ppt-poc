@@ -103,31 +103,43 @@ def lrclib_lyrics(record: dict) -> str:
 
 
 def extract_lyrics(description: str) -> str:
-    """Return the longest lyric-like block; never infer or generate missing lines."""
+    """Extract the strongest lyric block; ignore description copy and credits."""
     metadata_pattern = re.compile(
         r"https?://|www\.|#\w+|구독|subscribe|instagram|facebook|twitter|문의|비즈니스|"
-        r"저작권|copyright|작사|작곡|편곡|제공|출처|후원|donat|contact|credit|앨범 소개|수록곡|lyrics by|music by|"
+        r"저작권|copyright|작사|작곡|편곡|제공|출처|후원|donat|contact|credit|written\s+by|words\s*(?:and|&)\s*music\s*by|앨범 소개|수록곡|lyrics by|music by|"
         r"guitar|bass|drum|cello|videographer|photograph|color.?graded|video.?edit|engineer|lighting|"
         r"vocal|mixed|mastered|arrange|location|special thanks|recorded|camera|director|producer|production|"
-        r"피아워십|워십팀|세션|촬영|편집|녹화|음향|조명|마스터링|믹싱|연주|출연",
+        r"피아워십|워십팀|세션|촬영|편집|녹화|음향|조명|마스터링|믹싱|연주|출연|음악\s*자막\s*제작|자막\s*제작|"
+        r"본\s*영상은|수익\s*창출|수익\s*기능|사용하지\s*않았|수익을\s*창출|영상\s*제작|이용해\s*주셔서|시청해\s*주셔서",
+        re.IGNORECASE,
+    )
+    lyric_heading = re.compile(
+        r"^\s*[-*_=#> ]*(?:lyrics?|가사)(?:\s*(?:/|·|:|：|-|–)\s*(?:가사|lyrics?))?\s*[:：]?\s*[-*_=# ]*$",
         re.IGNORECASE,
     )
     blocks: list[list[str]] = []
     current: list[str] = []
+    has_lyrics_heading = False
     for raw_line in description.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
         line = re.sub(r"^\[\d{2}:\d{2}(?:\.\d+)?\]\s*", "", raw_line).strip()
         if not line:
             if current and current[-1] != "":
                 current.append("")
             continue
-        if re.fullmatch(r"[_*\[\]()\s]*(?:공식\s*)?(?:번안\s*)?(?:가사|lyrics|lyric|song\s*text)[_*\[\]()\s]*", line, re.IGNORECASE):
+        inline_heading = re.match(r"^\s*(?:lyrics?|가사)\s*[:：]\s*(\S.*)$", line, re.IGNORECASE)
+        if lyric_heading.fullmatch(line) or inline_heading:
             current = []
             blocks.clear()
+            has_lyrics_heading = True
+            if inline_heading:
+                current.append(inline_heading.group(1).strip())
             continue
         if metadata_pattern.search(line):
             if current:
                 blocks.append(current)
                 current = []
+            if has_lyrics_heading:
+                break
             continue
         if not re.search(r"[가-힣A-Za-z]", line):
             if current:
@@ -148,10 +160,21 @@ def extract_lyrics(description: str) -> str:
     if current:
         blocks.append(current)
 
-    block = max(blocks, key=lambda lines: sum(bool(line) for line in lines), default=[])
-    if sum(bool(line) for line in block) < 5:
+    def block_score(lines: list[str]) -> float:
+        content = [line for line in lines if line]
+        if not content:
+            return float("-inf")
+        hangul_lines = sum(bool(re.search(r"[가-힣]", line)) for line in content)
+        prose_lines = sum(bool(len(line) > 35 and re.search(r"[.!?…][\"'”’)]?$", line)) for line in content)
+        long_lines = sum(len(line) > 90 for line in content)
+        average_words = sum(len(line.split()) for line in content) / len(content)
+        return len(content) + hangul_lines * 1.5 - prose_lines * 3 - long_lines * 3 - max(0, average_words - 9) * 0.5
+
+    block = max(blocks, key=block_score, default=[])
+    lyrics = "\n".join(block).strip()
+    if sum(bool(line) for line in block) < 5 or len(re.findall(r"[가-힣A-Za-z]", lyrics)) < 40:
         return ""
-    return "\n".join(block).strip()
+    return lyrics
 
 
 def lrclib_match(artist: str, title: str) -> dict | None:

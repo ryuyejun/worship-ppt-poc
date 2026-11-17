@@ -46,23 +46,29 @@ async function readInput(request) {
 }
 
 function extractLyrics(description) {
-  const metadata = /https?:\/\/|www\.|#\S+|\bfeat\.?|\bft\.?|구독|subscribe|instagram|facebook|twitter|문의|비즈니스|저작권|copyright|작사|작곡|편곡|제공|출처|후원|donat|contact|credit|앨범 소개|수록곡|lyrics by|music by|guitar|bass|drum|cello|videographer|photograph|color.?graded|video.?edit|engineer|lighting|vocal|mixed|mastered|arrange|location|special thanks|recorded|camera|director|producer|production|피아워십|워십팀|세션|촬영|편집|녹화|음향|조명|마스터링|믹싱|연주|출연|음악\s*자막\s*제작|자막\s*제작|본\s*영상은|수익\s*창출|수익\s*기능|사용하지\s*않았|수익을\s*창출|본\s*영상|영상\s*제작|이용해\s*주셔서|시청해\s*주셔서/i;
+  const metadata = /https?:\/\/|www\.|#\S+|\bfeat\.?|\bft\.?|구독|subscribe|instagram|facebook|twitter|문의|비즈니스|저작권|copyright|작사|작곡|편곡|제공|출처|후원|donat|contact|credit|written\s+by|words\s*(?:and|&)\s*music\s*by|앨범 소개|수록곡|lyrics by|music by|guitar|bass|drum|cello|videographer|photograph|color.?graded|video.?edit|engineer|lighting|vocal|mixed|mastered|arrange|location|special thanks|recorded|camera|director|producer|production|피아워십|워십팀|세션|촬영|편집|녹화|음향|조명|마스터링|믹싱|연주|출연|음악\s*자막\s*제작|자막\s*제작|본\s*영상은|수익\s*창출|수익\s*기능|사용하지\s*않았|수익을\s*창출|본\s*영상|영상\s*제작|이용해\s*주셔서|시청해\s*주셔서/i;
+  const lyricHeading = /^\s*(?:[-*_=#> ]*)?(?:lyrics?|가사)(?:\s*(?:\/|·|:|：|-|–)\s*(?:가사|lyrics?))?\s*[:：]?\s*[-*_=# ]*$/i;
   const blocks = [];
   let current = [];
+  let hasLyricsHeading = false;
   for (const rawLine of String(description || '').replace(/\r\n?/g, '\n').split('\n')) {
     const line = rawLine.replace(/^\[\d{2}:\d{2}(?:\.\d+)?\]\s*/, '').trim();
     if (!line) {
       if (current.length && current[current.length - 1] !== '') current.push('');
       continue;
     }
-    if (/^[_*\[\]()\s]*(?:공식\s*)?(?:번안\s*)?(?:가사|lyrics|lyric|song\s*text)[_*\[\]()\s]*$/i.test(line)) {
+    const inlineHeading = line.match(/^\s*(?:lyrics?|가사)\s*[:：]\s*(\S.*)$/i);
+    if (lyricHeading.test(line) || inlineHeading) {
       current = [];
       blocks.length = 0;
+      hasLyricsHeading = true;
+      if (inlineHeading) current.push(inlineHeading[1].trim());
       continue;
     }
     if (metadata.test(line) || !/[가-힣A-Za-z]/.test(line)) {
       if (current.length) blocks.push(current);
       current = [];
+      if (hasLyricsHeading && metadata.test(line)) break;
       continue;
     }
     if (line.length > 30 && /[.!?…][\"'”’)]?$/.test(line)) {
@@ -78,7 +84,16 @@ function extractLyrics(description) {
     current.push(line);
   }
   if (current.length) blocks.push(current);
-  const best = blocks.sort((left, right) => right.filter(Boolean).length - left.filter(Boolean).length)[0] || [];
+  const score = block => {
+    const lines = block.filter(Boolean);
+    if (!lines.length) return -Infinity;
+    const hangulLines = lines.filter(line => /[가-힣]/.test(line)).length;
+    const proseLines = lines.filter(line => line.length > 35 && /[.!?…]["'”’)]?$/.test(line)).length;
+    const longLines = lines.filter(line => line.length > 90).length;
+    const avgWords = lines.reduce((sum, line) => sum + line.split(/\s+/).length, 0) / lines.length;
+    return lines.length + hangulLines * 1.5 - proseLines * 3 - longLines * 3 - Math.max(0, avgWords - 9) * 0.5;
+  };
+  const best = blocks.sort((left, right) => score(right) - score(left))[0] || [];
   const lyrics = best.filter(Boolean).join('\n').trim();
   const lines = lyrics.split('\n').map(line => line.trim()).filter(Boolean);
   const textLength = (lyrics.match(/[가-힣A-Za-z]/g) || []).length;
