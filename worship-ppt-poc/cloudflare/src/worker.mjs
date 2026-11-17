@@ -234,7 +234,10 @@ export default {
     if (path.startsWith('/auth/')) {
       if (path !== '/auth/me' && env.AUTH_LIMIT && !(await env.AUTH_LIMIT.limit({ key: request.headers.get('CF-Connecting-IP') || 'unknown' })).success) return fail('인증 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.', 429);
       try { return await handleAuthRequest(request, env, path); }
-      catch { return fail('인증 요청을 처리하지 못했습니다.', 500); }
+      catch (error) {
+        console.error('Authentication request failed', { path, error: error instanceof Error ? `${error.name}: ${error.message}` : 'unknown error' });
+        return fail('인증 요청을 처리하지 못했습니다.', 500);
+      }
     }
     if (!routes.has(path)) {
       if (path === '/batch-import' || path === '/requests/complete') return fail('웹에서 곡을 변경하는 기능은 아직 사용할 수 없습니다.', 403);

@@ -2,6 +2,7 @@ const ACCESS_COOKIE = '__Host-yebit_access';
 const REFRESH_COOKIE = '__Host-yebit_refresh';
 const ACCESS_TTL_SECONDS = 15 * 60;
 const REFRESH_TTL_SECONDS = 30 * 24 * 60 * 60;
+const PASSWORD_HASH_ITERATIONS = 100_000;
 const encoder = new TextEncoder();
 
 const response = (body, status = 200, cookies = []) => {
@@ -67,7 +68,7 @@ function equalBytes(left, right) {
 
 async function derivePassword(password, salt) {
   const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
-  return new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 210_000 }, key, 256));
+  return new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: PASSWORD_HASH_ITERATIONS }, key, 256));
 }
 
 async function hashToken(token) {
