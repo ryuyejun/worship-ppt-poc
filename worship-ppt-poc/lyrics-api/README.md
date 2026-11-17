@@ -56,8 +56,9 @@ Vite 개발 서버를 실행 중이라면 [localhost:5173/subtitle-lyrics](http:
 예제 자막으로 바로 실행하거나 JSON 파일을 올릴 수 있습니다. **규칙 정제 미리보기**에는
 API 키가 필요하지 않습니다. **모델로 가사 추출**은 아래 모델 설정을 사용합니다.
 
-서버 환경에 `OPENAI_API_KEY`를 설정한 뒤 호출합니다. 모델은 `LYRICS_LLM_MODEL`로
-바꿀 수 있고, 호환 서버의 주소는 `OPENAI_BASE_URL`로 지정합니다.
+로컬 LLM 호출을 위해 `lyrics-api/.env` 파일에 `OPENAI_API_KEY`를 설정합니다.
+이 파일은 Git에 포함되지 않습니다. 모델은 `LYRICS_LLM_MODEL`로 바꿀 수 있고,
+호환 서버의 주소는 `OPENAI_BASE_URL`로 지정합니다.
 
 ```python
 import json

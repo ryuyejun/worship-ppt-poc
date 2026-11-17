@@ -4,6 +4,8 @@ import hmac
 import json
 import os
 import re
+import tempfile
+import re
 import unicodedata
 import urllib.error
 import urllib.parse
@@ -14,11 +16,14 @@ from typing import Generator
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.responses import FileResponse
+from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import DateTime, String, Text, UniqueConstraint, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from subtitle_lyrics import LyricsExtractionError, RuleBasedCleaner, extract_clean_lyrics
+
+load_dotenv(Path(__file__).with_name(".env"))
 
 
 DATA_DIRECTORY = Path(os.getenv("LYRICS_DATA_DIRECTORY", "data"))
@@ -84,6 +89,10 @@ class SubtitleExtractionRequest(BaseModel):
     rules_only: bool = False
 
 
+class YouTubeSubtitleRequest(BaseModel):
+    video_id: str = Field(pattern=r"^[A-Za-z0-9_-]{11}$")
+
+
 class SubtitleExtractionResponse(BaseModel):
     lyrics: list[str]
 
@@ -107,6 +116,76 @@ def subtitle_lyrics_preview(payload: SubtitleExtractionRequest) -> SubtitleExtra
 
     try:
         return SubtitleExtractionResponse(lyrics=extract_clean_lyrics(cues))
+    except LyricsExtractionError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@app.post("/subtitle-lyrics/from-youtube", response_model=SubtitleExtractionResponse)
+def subtitle_lyrics_from_youtube(payload: YouTubeSubtitleRequest) -> SubtitleExtractionResponse:
+    if not os.getenv("OPENAI_API_KEY"):
+        raise HTTPException(status_code=503, detail="자막 가사 추출용 OPENAI_API_KEY가 로컬 서버에 설정되지 않았습니다.")
+
+    try:
+        import yt_dlp
+    except ImportError as error:
+        raise HTTPException(status_code=503, detail="YouTube 자막을 가져오는 기능이 설치되지 않았습니다.") from error
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="yebit-captions-") as directory:
+            options = {
+                "quiet": True,
+                "no_warnings": True,
+                "skip_download": True,
+                "writesubtitles": True,
+                "writeautomaticsub": True,
+                "subtitleslangs": ["ko.*", "en.*"],
+                "subtitlesformat": "vtt/best",
+                "outtmpl": str(Path(directory) / "%(id)s.%(ext)s"),
+                "socket_timeout": 10,
+                "extractor_retries": 1,
+                "noplaylist": True,
+            }
+            with yt_dlp.YoutubeDL(options) as downloader:
+                video = downloader.extract_info(
+                    f"https://www.youtube.com/watch?v={payload.video_id}",
+                    download=True,
+                )
+            subtitle_tracks = video.get("requested_subtitles") or {}
+            preferred_tracks = sorted(
+                subtitle_tracks.items(),
+                key=lambda item: (0 if item[0].lower().startswith("ko") else 1, item[0]),
+            )
+            subtitle_file = next(
+                (Path(track["filepath"]) for _, track in preferred_tracks if track.get("filepath")),
+                None,
+            )
+            if not subtitle_file or not subtitle_file.is_file():
+                raise HTTPException(status_code=404, detail="이 영상에서 한국어·영어 자막을 찾지 못했습니다.")
+
+            subtitles = []
+            for block in re.split(r"\n\s*\n", subtitle_file.read_text(encoding="utf-8-sig")):
+                lines = block.splitlines()
+                timing = next((index for index, line in enumerate(lines) if "-->" in line), None)
+                if timing is None:
+                    continue
+                timestamp = re.match(r"(?:(\d+):)?(\d{2}):(\d{2})[.,](\d{3})", lines[timing])
+                if timestamp is None:
+                    continue
+                hours = int(timestamp.group(1) or 0)
+                start = hours * 3600 + int(timestamp.group(2)) * 60 + int(timestamp.group(3)) + int(timestamp.group(4)) / 1000
+                text = " ".join(lines[timing + 1:]).strip()
+                if text:
+                    subtitles.append({"start": start, "duration": 0.1, "text": text})
+            if not subtitles:
+                raise HTTPException(status_code=404, detail="가사로 분석할 수 있는 자막이 없습니다.")
+    except HTTPException:
+        raise
+    except Exception as error:
+        logger.exception("YouTube subtitle retrieval failed (%s)", type(error).__name__)
+        raise HTTPException(status_code=502, detail="YouTube 자막을 불러오지 못했습니다.") from error
+
+    try:
+        return SubtitleExtractionResponse(lyrics=extract_clean_lyrics(subtitles))
     except LyricsExtractionError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
 

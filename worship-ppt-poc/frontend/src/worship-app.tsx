@@ -239,6 +239,7 @@ export function WorshipApp() {
   const lyricsRequest = useRef<AbortController | null>(null);
   const [lyricsLoadingSongId, setLyricsLoadingSongId] = useState<number | null>(null);
   const [lyricsLoadError, setLyricsLoadError] = useState<{ songId: number; message: string } | null>(null);
+  const [subtitleLoadingSongId, setSubtitleLoadingSongId] = useState<number | null>(null);
   const [searchNotice, setSearchNotice] = useState<Notice>(null);
   const [pptNotice, setPptNotice] = useState<Notice>(null);
   const [searching, setSearching] = useState(false);
@@ -390,6 +391,43 @@ export function WorshipApp() {
     }
   }, [authStatus, youtubeVideos, favoriteArtwork]);
 
+  async function extractYouTubeSubtitleLyrics(song: Song, preferredVideoId?: string, signal?: AbortSignal) {
+    setSubtitleLoadingSongId(song.id);
+    try {
+      let videoId = preferredVideoId || youtubeVideoIdFromUrl(song.source)
+        || youtubeVideos.find((video) => video.songId === song.id)?.videoId;
+      if (!videoId && song.id > 0) {
+        const artwork = await api<{ videoId: string | null }>('/youtube-thumbnail/search', {
+          songId: song.id, title: song.title, artist: song.artist,
+        }, signal);
+        videoId = artwork.data.videoId ?? undefined;
+      }
+      if (!videoId) throw new Error('곡과 연결된 YouTube 영상을 찾지 못했습니다.');
+
+      const response = await fetch('/subtitle-lyrics/from-youtube', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_id: videoId }),
+        signal,
+      });
+      const payload = await response.json() as { lyrics?: string[]; detail?: string };
+      if (!response.ok) throw new Error(payload.detail || 'YouTube 자막에서 가사를 추출하지 못했습니다.');
+      if (!payload.lyrics?.length) throw new Error('영상 자막에서 가사로 판별된 줄이 없습니다.');
+
+      const updatedSong = {
+        ...song,
+        source: `https://www.youtube.com/watch?v=${videoId}`,
+        status: 'USER_SUPPLIED',
+        lyrics: payload.lyrics.join('\n'),
+      };
+      setActiveSong((current) => current?.id === song.id ? updatedSong : current);
+      setLyricsLoadError(null);
+      return updatedSong;
+    } finally {
+      setSubtitleLoadingSongId(null);
+    }
+  }
+
   function selectSong(song: Song, closeSearch = true, trendingVideoId?: string) {
     lyricsRequest.current?.abort();
     setActiveSong(song);
@@ -401,22 +439,33 @@ export function WorshipApp() {
       lyricsRequest.current = request;
       const timeout = AbortSignal.timeout(25_000);
       setLyricsLoadingSongId(song.id);
-      void api<Song>('/song-lyrics', { id: song.id, videoId: trendingVideoId }, AbortSignal.any([request.signal, timeout])).then(({ data }) => {
-        if (request.signal.aborted) return;
-        if (data.id < 0) setExternalResults((songs) => [data, ...songs.filter((item) => item.id !== data.id)]);
-        setActiveSong((current) => current?.id === song.id ? data : current);
-      }).catch((error: unknown) => {
-        if (request.signal.aborted) return;
-        setLyricsLoadError({
-          songId: song.id,
-          message: timeout.aborted ? '가사 응답 시간이 초과됐습니다.' : error instanceof Error ? error.message : '가사를 불러오지 못했습니다.',
-        });
-      }).finally(() => {
+      void (async () => {
+        try {
+          const { data } = await api<Song>('/song-lyrics', { id: song.id, videoId: trendingVideoId }, AbortSignal.any([request.signal, timeout]));
+          if (request.signal.aborted) return;
+          if (data.id < 0) setExternalResults((songs) => [data, ...songs.filter((item) => item.id !== data.id)]);
+          setActiveSong((current) => current?.id === song.id ? data : current);
+        } catch (error) {
+          if (request.signal.aborted) return;
+          if (import.meta.env.DEV) {
+            try {
+              await extractYouTubeSubtitleLyrics(song, trendingVideoId, request.signal);
+              return;
+            } catch (subtitleError) {
+              error = subtitleError;
+            }
+          }
+          setLyricsLoadError({
+            songId: song.id,
+            message: timeout.aborted ? '가사 응답 시간이 초과됐습니다.' : error instanceof Error ? error.message : '가사를 불러오지 못했습니다.',
+          });
+        } finally {
         if (lyricsRequest.current === request) {
           lyricsRequest.current = null;
           setLyricsLoadingSongId(null);
         }
-      });
+        }
+      })();
     }
     changeEditorTab('lyrics');
     if (closeSearch) setSearchOpen(false);
@@ -1198,7 +1247,7 @@ export function WorshipApp() {
                 {editorTab === 'songs' && recentSongs.length > 0 && <section className="recent-song-section" aria-label="최근 곡">
                   <div className="recent-song-list">{recentSongs.slice(0, 5).map((recent) => { const videoId = recent.youtubeVideoId || youtubeVideos.find((video) => video.songId === recent.id)?.videoId; const imageUrl = youtubeThumbnailUrl(videoId); return <div className="recent-song-card-shell" key={`${recent.id}:${recent.title}`} role="button" tabIndex={0} aria-label={`${recent.title} 선택`} onClick={() => void openRecentSong(recent)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); void openRecentSong(recent); } }}><div className="recent-song-card">{imageUrl && <img className="recent-song-card__image" src={imageUrl} alt="" />}<span className="recent-song-card__glass"><span className="recent-song-card__title"><strong>{recent.title}</strong></span><span className="recent-song-card__meta"><small>최근 선택 · {new Date(recent.selectedAt).toLocaleDateString('ko-KR')}</small></span></span></div><button className="recent-song-delete" type="button" onClick={(event) => { event.stopPropagation(); setRecentSongs((songs) => songs.filter((song) => recentTitleKey(song.title) !== recentTitleKey(recent.title))); }} aria-label={`${recent.title} 최근 목록에서 삭제`}>×</button></div>; })}</div>
                 </section>}
-                {editorTab === 'lyrics' && activeSong && <article className="song-detail" aria-live="polite"><div className="detail-title"><div><p className="eyebrow">선택한 찬양</p><h3>{activeSong.title}</h3></div><div className="detail-actions">{activeSong.id > 0 && <button className={`favorite-toggle${favoriteIds.includes(activeSong.id) ? ' is-favorite' : ''}`} type="button" onClick={() => toggleFavorite(activeSong)} aria-label={favoriteIds.includes(activeSong.id) ? '즐겨찾기 해제' : '즐겨찾기 추가'}>{favoriteIds.includes(activeSong.id) ? '★' : '☆'}</button>}<button className="icon-button" onClick={() => { setActiveSong(null); setEditorTab('songs'); }} aria-label="선택한 곡 닫기">×</button></div></div><dl className="song-meta"><div><dt>공연팀</dt><dd>{displayPerson(activeSong.artist)}</dd></div></dl><div className="lyrics-preview"><span>가사 미리보기</span><p>{activeSong.lyrics?.trim() ? <>{activeSong.id < 0 ? activeSong.lyrics.trim() : activeSong.lyrics.trim().slice(0, 520)}{activeSong.id > 0 && activeSong.lyrics.length > 520 ? '…' : ''}</> : lyricsLoadingSongId === activeSong.id ? '가사를 불러오는 중입니다.' : lyricsLoadError?.songId === activeSong.id ? lyricsLoadError.message : '이 곡은 아직 가사가 등록되어 있지 않습니다.'}</p></div>{activeSong.id < 0 && <p className="editor-hint">{activeSong.source?.includes('youtube.com') ? 'YouTube 영상 설명란에서 찾은 가사 후보입니다. 곡과 가사를 확인한 뒤 사용해 주세요. DB에는 저장되지 않습니다.' : 'LRCLIB 제공 가사입니다. 곡과 가사를 확인하고 이용 권한이 있는 경우에 사용해 주세요. DB에는 저장되지 않습니다.'}</p>}{lyricsLoadError?.songId === activeSong.id && <button type="button" className="btn btn--secondary" onClick={() => selectSong(activeSong)}>가사 다시 불러오기</button>}<button className="btn btn--secondary add-button" disabled={lyricsLoadingSongId === activeSong.id || lyricsLoadError?.songId === activeSong.id} onClick={() => addSelection(activeSong)}>{lyricsLoadingSongId === activeSong.id ? '가사를 불러오는 중' : '제작 목록에 추가'}</button></article>}
+                {editorTab === 'lyrics' && activeSong && <article className="song-detail" aria-live="polite"><div className="detail-title"><div><p className="eyebrow">선택한 찬양</p><h3>{activeSong.title}</h3></div><div className="detail-actions">{activeSong.id > 0 && <button className={`favorite-toggle${favoriteIds.includes(activeSong.id) ? ' is-favorite' : ''}`} type="button" onClick={() => toggleFavorite(activeSong)} aria-label={favoriteIds.includes(activeSong.id) ? '즐겨찾기 해제' : '즐겨찾기 추가'}>{favoriteIds.includes(activeSong.id) ? '★' : '☆'}</button>}<button className="icon-button" onClick={() => { setActiveSong(null); setEditorTab('songs'); }} aria-label="선택한 곡 닫기">×</button></div></div><dl className="song-meta"><div><dt>공연팀</dt><dd>{displayPerson(activeSong.artist)}</dd></div></dl><div className="lyrics-preview"><span>가사 미리보기</span><p>{activeSong.lyrics?.trim() ? <>{activeSong.id < 0 ? activeSong.lyrics.trim() : activeSong.lyrics.trim().slice(0, 520)}{activeSong.id > 0 && activeSong.lyrics.length > 520 ? '…' : ''}</> : lyricsLoadingSongId === activeSong.id || subtitleLoadingSongId === activeSong.id ? '가사를 불러오는 중입니다.' : lyricsLoadError?.songId === activeSong.id ? lyricsLoadError.message : '이 곡은 아직 가사가 등록되어 있지 않습니다.'}</p></div>{activeSong.id < 0 && <p className="editor-hint">{activeSong.source?.includes('youtube.com') ? 'YouTube 영상 설명란에서 찾은 가사 후보입니다. 곡과 가사를 확인한 뒤 사용해 주세요. DB에는 저장되지 않습니다.' : 'LRCLIB 제공 가사입니다. 곡과 가사를 확인하고 이용 권한이 있는 경우에 사용해 주세요. DB에는 저장되지 않습니다.'}</p>}{import.meta.env.DEV && <button type="button" className="btn btn--secondary" disabled={subtitleLoadingSongId === activeSong.id} onClick={() => void extractYouTubeSubtitleLyrics(activeSong).catch((error: unknown) => setLyricsLoadError({ songId: activeSong.id, message: error instanceof Error ? error.message : 'YouTube 자막에서 가사를 추출하지 못했습니다.' }))}>{subtitleLoadingSongId === activeSong.id ? 'YouTube 자막 분석 중' : 'YouTube 자막으로 가사 확인'}</button>}{lyricsLoadError?.songId === activeSong.id && <button type="button" className="btn btn--secondary" onClick={() => selectSong(activeSong)}>가사 다시 불러오기</button>}<button className="btn btn--secondary add-button" disabled={lyricsLoadingSongId === activeSong.id || subtitleLoadingSongId === activeSong.id} onClick={() => addSelection(activeSong)}>{lyricsLoadingSongId === activeSong.id || subtitleLoadingSongId === activeSong.id ? '가사를 불러오는 중' : '제작 목록에 추가'}</button></article>}
                 {editorTab === 'songs' && selected.length > 0 && <section ref={selectedQueueRef} className="editor-selected-queue" aria-labelledby="editor-selected-title"><div className="editor-heading"><h2 id="editor-selected-title">제작 목록</h2><span>{selected.length}곡</span></div><ol className="selected-list">{selected.map((song, index) => <li key={song.id} data-song-id={song.id} draggable onDragStart={(event) => { draggedSongIdRef.current = song.id; originalSongOrderRef.current = selected.map((item) => item.id); setDraggedSongId(song.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', String(song.id)); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; reorderDraggedSong(song.id, event.clientY, event.currentTarget); }} onDrop={(event) => event.preventDefault()} onDragEnd={() => { if (originalSongOrderRef.current?.some((id, orderIndex) => selected[orderIndex]?.id !== id)) { setRemovedSlideIndexes([]); setSlidePositions({}); setSlideTextOverrides({}); setSlideTextColors({}); setEditingSlide(null); } draggedSongIdRef.current = null; originalSongOrderRef.current = null; setDraggedSongId(null); }} className={draggedSongId === song.id ? 'is-dragging' : ''} aria-roledescription="끌어서 순서 변경"><span className="selected-drag-handle" aria-hidden="true">⠿</span><span className="selected-index">{String(index + 1).padStart(2, '0')}</span><span className="selected-song"><strong>{song.title}</strong></span><div className="selected-actions"><button type="button" onClick={() => moveSong(index, -1)} disabled={index === 0} aria-label={`${song.title} 위로`}>↑</button><button type="button" onClick={() => moveSong(index, 1)} disabled={index === selected.length - 1} aria-label={`${song.title} 아래로`}>↓</button><button type="button" onClick={() => { setRemovedSlideIndexes([]); setSelected((items) => items.filter((item) => item.id !== song.id)); }} aria-label={`${song.title} 제거`}>×</button></div></li>)}</ol></section>}
               </div> : editorTab === 'favorites' ? <div className="editor-control-group">
                 <div className="editor-heading"><h2>즐겨찾기</h2><span>{favoriteSongs.length}곡</span></div>
