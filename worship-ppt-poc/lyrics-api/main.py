@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import logging
 import os
 import re
 import tempfile
@@ -23,6 +24,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sess
 from subtitle_lyrics import extract_clean_lyrics
 
 load_dotenv(Path(__file__).with_name(".env"))
+logger = logging.getLogger(__name__)
 
 
 DATA_DIRECTORY = Path(os.getenv("LYRICS_DATA_DIRECTORY", "data"))
