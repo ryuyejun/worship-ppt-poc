@@ -13,9 +13,12 @@ from pathlib import Path
 from typing import Generator
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import DateTime, String, Text, UniqueConstraint, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+
+from subtitle_lyrics import LyricsExtractionError, RuleBasedCleaner, extract_clean_lyrics
 
 
 DATA_DIRECTORY = Path(os.getenv("LYRICS_DATA_DIRECTORY", "data"))
@@ -68,6 +71,44 @@ class LyricsResponse(BaseModel):
     lyrics: str
     source_url: str | None = None
     provider: str = "LOCAL"
+
+
+class SubtitleCue(BaseModel):
+    start: float = Field(ge=0, allow_inf_nan=False)
+    duration: float = Field(ge=0, allow_inf_nan=False)
+    text: str = Field(max_length=5000)
+
+
+class SubtitleExtractionRequest(BaseModel):
+    subtitles: list[SubtitleCue] = Field(max_length=5000)
+    rules_only: bool = False
+
+
+class SubtitleExtractionResponse(BaseModel):
+    lyrics: list[str]
+
+
+@app.get("/subtitle-lyrics", include_in_schema=False)
+def subtitle_lyrics_page() -> FileResponse:
+    return FileResponse(Path(__file__).with_name("subtitle_preview") / "index.html")
+
+
+@app.post("/subtitle-lyrics", response_model=SubtitleExtractionResponse)
+def subtitle_lyrics_preview(payload: SubtitleExtractionRequest) -> SubtitleExtractionResponse:
+    if sum(len(cue.text) for cue in payload.subtitles) > 120_000:
+        raise HTTPException(status_code=413, detail="자막이 너무 깁니다. 나눠서 입력해 주세요.")
+
+    cues = [cue.model_dump() for cue in payload.subtitles]
+    if payload.rules_only:
+        return SubtitleExtractionResponse(lyrics=RuleBasedCleaner().clean(cues))
+
+    if not os.getenv("OPENAI_API_KEY"):
+        raise HTTPException(status_code=503, detail="모델로 추출하려면 서버에 OPENAI_API_KEY를 설정해 주세요.")
+
+    try:
+        return SubtitleExtractionResponse(lyrics=extract_clean_lyrics(cues))
+    except LyricsExtractionError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
 
 
 def normalize(value: str) -> str:

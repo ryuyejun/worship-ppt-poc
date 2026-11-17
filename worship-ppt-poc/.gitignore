@@ -28,3 +28,6 @@ cloudflare/node_modules/
 
 firebase/*-debug.log
 firebase/.firebase/
+
+melody-api/.venv/
+melody-api/__pycache__/

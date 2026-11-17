@@ -39,3 +39,38 @@ LRCLIB 검색은 공개 API를 사용합니다. LRCLIB에 결과가 없거나 �
 LRCLIB와 YouTube에서 가져온 가사 본문은 조회 시점에만 반환하며 SQLite에 저장하지 않습니다. 등록은 사용자가 가사 사용 권한을 확인한 뒤 기존 `POST /lyrics`에 등록 토큰과 함께 직접 제공해야 합니다. YouTube API 데이터 보관 정책은 API 데이터를 일반적으로 최대 30일까지만 저장하도록 제한합니다. [YouTube API 데이터 저장 정책](https://developers.google.com/youtube/terms/developer-policies#e.-handling-youtube-data-and-content)
 
 이 API는 현재 Cloudflare Worker/D1 웹 앱과 아직 연결되지 않았습니다. FastAPI는 Cloudflare Workers에서 직접 실행할 수 없으므로, 웹 앱과 연결하려면 Python 서비스를 실행할 별도 호스트와 HTTPS 주소가 필요합니다. Genius/syncedlyrics 가사 자동 수집은 제공처의 허용된 사용 및 저장 조건이 확인되기 전까지 비활성 상태입니다.
+
+## 자막에서 가사 추출
+
+이미 파싱한 JSON 또는 VTT 자막의 큐 목록을 Python에서 처리할 수 있습니다.
+각 큐에는 초 단위의 `start`, `duration`과 문자열 `text`를 넣습니다.
+
+```sh
+cd lyrics-api
+python -m pip install '.[subtitles]'
+```
+
+로컬에서 `uvicorn main:app --host 127.0.0.1 --port 8001`을 실행하고
+[자막 가사 추출 화면](http://127.0.0.1:8001/subtitle-lyrics)을 엽니다.
+Vite 개발 서버를 실행 중이라면 [localhost:5173/subtitle-lyrics](http://localhost:5173/subtitle-lyrics)에서도 열 수 있습니다.
+예제 자막으로 바로 실행하거나 JSON 파일을 올릴 수 있습니다. **규칙 정제 미리보기**에는
+API 키가 필요하지 않습니다. **모델로 가사 추출**은 아래 모델 설정을 사용합니다.
+
+서버 환경에 `OPENAI_API_KEY`를 설정한 뒤 호출합니다. 모델은 `LYRICS_LLM_MODEL`로
+바꿀 수 있고, 호환 서버의 주소는 `OPENAI_BASE_URL`로 지정합니다.
+
+```python
+import json
+from pathlib import Path
+
+from subtitle_lyrics import extract_clean_lyrics
+
+subtitles = json.loads(Path("subtitles.json").read_text(encoding="utf-8"))
+lyrics = extract_clean_lyrics(subtitles)
+```
+
+정제된 자막은 설정한 모델 서버에 전송됩니다. 기본값은 Structured Outputs이고,
+JSON 모드만 제공하는 서버에서는 `RuleBasedCleaner().clean(subtitles)`의 결과를
+`LLMLyricsExtractor(client=client, model="모델 이름", json_mode=True).extract(lines)`에
+전달할 수 있습니다. 가사를 찾지 못하면 빈 리스트를 반환하고, API 오류나 유효하지
+않은 모델 응답은 `LyricsExtractionError`로 알립니다.

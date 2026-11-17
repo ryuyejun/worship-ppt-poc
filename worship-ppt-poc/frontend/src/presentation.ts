@@ -1,10 +1,12 @@
+import type { AutoMelody } from './auto-melody';
 import type { Song } from './types';
+import type { ScoreSlide } from './score';
 
 export type SlideTextPosition = { x: number; y: number; width: number; height: number };
 export type SlideStyle = { backgroundColor: string; textColor: string; fontFamily: string; fontSize: number; alignment: 'LEFT' | 'CENTER' | 'RIGHT'; linesPerSlide: number; bold: boolean; textX?: number; textY?: number; textWidth?: number; textHeight?: number; backgroundImageBase64?: string; backgroundImageType?: string };
 export type SlideSize = { width: number; height: number };
-export type PresentationInput = { slideSize?: SlideSize; songIds: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; extraSlides?: number; removedSlideIndexes?: number[]; slidePositions?: Record<number, SlideTextPosition>; slideTextOverrides?: Record<number, string>; slideTextColors?: Record<number, string>; pptxBase64?: string; style: SlideStyle };
-export type Slide = { title: string; lines: string[]; textPosition?: SlideTextPosition; textColor?: string };
+export type PresentationInput = { slideSize?: SlideSize; songIds: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; autoMelodies?: Record<number, AutoMelody>; scorePages?: { title: string; slides: ScoreSlide[] }[]; extraSlides?: number; removedSlideIndexes?: number[]; slidePositions?: Record<number, SlideTextPosition>; slideTextOverrides?: Record<number, string>; slideTextColors?: Record<number, string>; pptxBase64?: string; style: SlideStyle };
+export type Slide = { autoScore?: boolean; title: string; lines: string[]; scoreRows?: ScoreSlide['rows']; textPosition?: SlideTextPosition; textColor?: string };
 const lyricCache = new Map<number, Song>();
 
 function lyricLineWidth(text: string, fontSize: number): number {
@@ -22,6 +24,12 @@ function lyricLineWidth(text: string, fontSize: number): number {
 function wrapLyricLine(line: string, maxWidth: number, fontSize: number): string[] {
   const words = line.trim().split(/\s+/u).filter(Boolean);
   if (!words.length) return [];
+  const wordWidths = words.map(word => lyricLineWidth(word, fontSize));
+  if (wordWidths.every(width => width <= maxWidth)) {
+    return balanceLyricWords(words, wordWidths, maxWidth, lyricLineWidth(' ', fontSize));
+  }
+
+  // Keep character wrapping available for a word wider than the slide.
   const wrapped: string[] = [];
   let current = '';
   for (const word of words) {
@@ -46,6 +54,39 @@ function wrapLyricLine(line: string, maxWidth: number, fontSize: number): string
   return wrapped;
 }
 
+function balanceLyricWords(words: string[], widths: number[], maxWidth: number, spaceWidth: number): string[] {
+  const count = words.length;
+  // For each suffix, use the fewest rows, then prefer more even row widths.
+  // With a fixed row count and total text width, minimizing squared widths
+  // also minimizes the variation in width between rows.
+  const rowCounts = new Array<number>(count + 1).fill(Infinity);
+  const costs = new Array<number>(count + 1).fill(Infinity);
+  const next = new Array<number>(count);
+  rowCounts[count] = 0;
+  costs[count] = 0;
+
+  for (let start = count - 1; start >= 0; start--) {
+    let width = 0;
+    for (let end = start + 1; end <= count; end++) {
+      width += widths[end - 1] + (end === start + 1 ? 0 : spaceWidth);
+      if (width > maxWidth) break;
+      const rows = rowCounts[end] + 1;
+      const cost = width ** 2 + costs[end];
+      if (rows < rowCounts[start] || (rows === rowCounts[start] && cost < costs[start])) {
+        rowCounts[start] = rows;
+        costs[start] = cost;
+        next[start] = end;
+      }
+    }
+  }
+
+  const lines: string[] = [];
+  for (let start = 0; start < count; start = next[start]) {
+    lines.push(words.slice(start, next[start]).join(' '));
+  }
+  return lines;
+}
+
 export function splitLyrics(lyrics: string, perSlide: number, layout?: { width: number; fontSize: number; maxTextWidth: number }): string[][] {
   if (!lyrics.trim()) throw new Error('가사가 없습니다.');
   if (!Number.isInteger(perSlide) || perSlide < 1 || perSlide > 6) throw new Error('한 장의 줄 수는 1~6이어야 합니다.');
@@ -65,10 +106,12 @@ export async function collectSlides(input: PresentationInput, signal?: AbortSign
   if (input.pptxBase64) throw new Error('기존 PPTX에 추가하는 기능은 Cloudflare 전환 중입니다. 새 PPTX로 만들어 주세요.');
   const external = new Map((input.externalSongs || []).map(song => [song.id, song]));
   const songs = await Promise.all(input.songIds.map(async id => {
-    if (id < 0) { const song = external.get(id); if (!song?.lyrics.trim()) throw new Error('선택한 곡에 가사가 없습니다.'); return song; }
+    const supplied = external.get(id);
+    if (supplied?.lyrics.trim()) return supplied;
+    if (id < 0) throw new Error('선택한 곡에 가사가 없습니다.');
     let song = lyricCache.get(id);
     if (!song) {
-      const response = await fetch('/song', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }), signal });
+      const response = await fetch('/song', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(25_000)]) : AbortSignal.timeout(25_000) });
       if (!response.ok) throw new Error('선택한 곡의 가사를 불러오지 못했습니다.');
       const result = await response.json() as { success: boolean; data: Song | null };
       if (!result.success || !result.data?.lyrics?.trim()) throw new Error('선택한 곡에 가사가 없습니다.');
@@ -88,20 +131,50 @@ export async function collectSlides(input: PresentationInput, signal?: AbortSign
   const lineHeight = input.style.fontSize * 96 / 72 * 1.2;
   const fittingLines = Math.max(1, Math.floor(slideHeight * maxTextHeight / 100 / lineHeight));
   const safeLinesPerSlide = Math.min(input.style.linesPerSlide, fittingLines);
-  const slides = songs.flatMap(song => splitLyrics(song.lyrics, safeLinesPerSlide, layout).map(lines => ({ title: song.title, lines })));
+  const scoresByTitle = new Map((input.scorePages ?? []).map(score => [score.title.normalize('NFC').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, ''), score]));
+  const scoreRenderer = input.autoMelodies && Object.keys(input.autoMelodies).length
+    ? await import('./score').catch(() => null) : null;
+  type ScoredSlide = Slide & { autoRows?: { bpm: number; key?: string; notes: AutoMelody['notes'][] } };
+  const slides = songs.flatMap<ScoredSlide>(song => {
+    const title = song.title.normalize('NFC').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+    const score = scoresByTitle.get(title);
+    if (score?.slides.length) {
+      return score.slides.map(page => ({ title: song.title, lines: page.rows.map(row => row.lyrics), scoreRows: page.rows }));
+    }
+    const pages = splitLyrics(song.lyrics, safeLinesPerSlide, layout);
+    const candidate = input.autoMelodies?.[song.id];
+    const melody = candidate?.title === song.title ? candidate : undefined;
+    const rows = melody && scoreRenderer
+      ? scoreRenderer.alignMelodyNotes(pages.flat(), melody.notes.slice(melody.lyricsStart ?? 0), melody.bpm) : [];
+    let rowIndex = 0;
+    return pages.map(lines => {
+      const notes = rows.slice(rowIndex, rowIndex + lines.length);
+      rowIndex += lines.length;
+      return { title: song.title, lines, autoRows: melody && notes.length ? { bpm: melody.bpm, key: melody.key ?? undefined, notes } : undefined };
+    });
+  });
   const extraSlides = Math.max(0, Math.min(100, Math.floor(input.extraSlides ?? 0)));
   if (!slides.length) slides.push({ title: '', lines: [] });
   slides.push(...Array.from({ length: extraSlides }, () => ({ title: '', lines: [] })));
   const removed = new Set((input.removedSlideIndexes ?? []).filter(index => Number.isInteger(index) && index >= 0));
   const visibleSlides = slides.filter((_, index) => !removed.has(index));
-  const result = visibleSlides.length ? visibleSlides : [{ title: '', lines: [] }];
-  return result.map((slide, index) => {
+  const result: ScoredSlide[] = visibleSlides.length ? visibleSlides : [{ title: '', lines: [] }];
+  return Promise.all(result.map(async ({ autoRows, ...slide }, index) => {
+    const color = input.slideTextColors?.[index] ?? input.style.textColor;
+    if (autoRows && scoreRenderer && input.slideTextOverrides?.[index] === undefined && !signal?.aborted) {
+      const rows = slide.lines.map((lyrics, line) => ({ lyrics, notes: autoRows.notes[line] }));
+      const scoreRows = await scoreRenderer.renderAutoScoreRows(rows, autoRows.bpm, color, autoRows.key).catch(() => []);
+      if (scoreRows.length) {
+        slide.scoreRows = scoreRows;
+        slide.autoScore = true;
+      }
+    }
     const longestLine = Math.max(1, ...slide.lines.map(line => [...line].length));
     const width = Math.max(18, Math.min(90, longestLine * ((input.style.fontSize ?? 40) / 960) * 100 + 3));
     const aspect = (input.slideSize?.height ?? 720) / (input.slideSize?.width ?? 1280);
     const height = Math.max(12, Math.min(80, slide.lines.length * (input.style.fontSize / 960) * 120 / aspect + 3));
-    return { ...slide, lines: input.slideTextOverrides?.[index] !== undefined ? input.slideTextOverrides[index].split(/\r\n|\r|\n/) : slide.lines, textPosition: input.slidePositions?.[index] ?? { x: input.style.textX ?? 50, y: input.style.textY ?? 50, width: input.style.textWidth === 87.5 ? width : input.style.textWidth ?? width, height: input.style.textHeight === 55.6 ? height : input.style.textHeight ?? height }, textColor: input.slideTextColors?.[index] ?? input.style.textColor };
-  });
+    return { ...slide, lines: input.slideTextOverrides?.[index] !== undefined ? input.slideTextOverrides[index].split(/\r\n|\r|\n/) : slide.lines, textPosition: input.slidePositions?.[index] ?? { x: input.style.textX ?? 50, y: input.style.textY ?? 50, width: input.style.textWidth === 87.5 ? width : input.style.textWidth ?? width, height: input.style.textHeight === 55.6 ? height : input.style.textHeight ?? height }, textColor: color };
+  }));
 }
 
 export async function makePresentation(slides: Slide[], style: SlideStyle, size = {width:1280,height:720}): Promise<Blob> {
@@ -114,6 +187,21 @@ export async function makePresentation(slides: Slide[], style: SlideStyle, size 
     if (style.backgroundImageBase64 && style.backgroundImageType) {
       const type = style.backgroundImageType === 'PNG' ? 'png' : 'jpeg';
       slide.addImage({ data: `data:image/${type};base64,${style.backgroundImageBase64}`, x: 0, y: 0, w: size.width/96, h: size.height/96 });
+    }
+    if (item.scoreRows?.length) {
+      const rowCount = item.scoreRows.length;
+      const rowHeight = Math.min(2.05, (size.height / 96) * 0.84 / rowCount);
+      const rowScale = rowHeight / 2.05;
+      const blockHeight = rowCount * rowHeight;
+      const startY = (size.height / 96 - blockHeight) / 2;
+      item.scoreRows.forEach((row, index) => {
+        const y = startY + index * rowHeight;
+        if (row.staff) slide.addImage({ data: row.staff, x: 0.7, y, w: size.width / 96 - 1.4, h: 1.2 * rowScale });
+        slide.addText(row.lyrics, { x: 0.9, y: y + 1.2 * rowScale, w: size.width / 96 - 1.8, h: 0.7 * rowScale,
+          fontFace: style.fontFamily, fontSize: style.fontSize, color: (item.textColor ?? style.textColor).replace('#', ''),
+          bold: style.bold, align: alignment[style.alignment], valign: 'middle', margin: 0, fit: 'shrink' });
+      });
+      continue;
     }
     const position = item.textPosition ?? { x: style.textX ?? 50, y: style.textY ?? 50, width: style.textWidth ?? 87.5, height: style.textHeight ?? 55.6 };
     const textWidth = size.width * position.width / 100;

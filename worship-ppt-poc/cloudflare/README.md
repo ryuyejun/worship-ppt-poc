@@ -20,3 +20,9 @@ npx wrangler deploy --config cloudflare/wrangler.web.test.jsonc
 곡 검색의 `POST /providers/search`는 검색 후보의 영상 설명을 YouTube `videos.list`로 추가 조회하고, URL·홍보·출처 안내를 제외한 5줄 이상의 가사형 본문을 응답에 포함한다. 이 본문은 검색 결과와 미리보기에만 사용하며 D1에 저장하지 않는다. 검색 결과에서 가사 본문을 확인할 수 있는 후보를 선택하면 기존 PPT 제작 흐름에서 사용할 수 있다.
 
 트렌드·최근·즐겨찾기에서 가사가 비어 있는 등록곡을 선택하면 `POST /song-lyrics`가 D1 → LRCLIB → YouTube 영상 설명란 순으로 가사를 조회한다. 외부에서 찾은 가사는 일시적으로 반환하고 D1에 저장하지 않으며, PPT 제작 목록에는 외부 가사 입력으로 포함한다.
+
+## MIDI 악보 검색
+
+`GET /api/midi/search?title=Amazing+Grace`는 제목과 별칭으로 등록된 MIDI를 찾아 기존 `{ success, data, error }` 형식으로 반환합니다. 제목은 1~120자이며 일치하는 곡이 없으면 `data: []`를 반환합니다. 검색 결과에는 곡 제목, 출처 URL, BPM과 트랙별 음표가 들어 있습니다. 각 음표에는 MIDI 번호, 고정도법 계이름(C=도), 옥타브, 시작 시간, 재생 길이, 악보용 박 길이가 포함됩니다.
+
+초기 자료는 CCEL의 공개 찬송가 MIDI 3곡입니다. 원본 MIDI와 출처는 `src/midi-catalog.json`에 있습니다. MIDI 검색은 악보 시험 화면에서 로그인 없이 사용 가능하며 기존 API 요청 제한을 따릅니다.

@@ -1,3 +1,4 @@
+import { findMidiScores } from './midi-catalog.mjs';
 import { listSongs, searchSongs, getSong, queueMissing } from './songs.mjs';
 import { findArtwork, getArtworkImage } from './artwork.mjs';
 import { refreshYoutubeStatistics } from './youtube-statistics.mjs';
@@ -225,7 +226,63 @@ export default {
     })());
   },
   async fetch(request, env) {
-    const path = new URL(request.url).pathname;
+    const url = new URL(request.url);
+    const path = url.pathname;
+    const melodyJobPath = /^\/api\/auto-melody\/jobs\/[a-f0-9]{32}$/.test(path);
+    const melodyUpload = path === '/api/auto-melody/jobs/upload';
+    const melodySubmit = path === '/api/auto-melody/jobs' || melodyUpload;
+    if (path === '/api/auto-melody' || melodySubmit || melodyJobPath) {
+      const methods = melodySubmit ? ['POST'] : melodyJobPath ? ['GET', 'PUT'] : ['GET'];
+      if (!methods.includes(request.method)) return fail('지원하지 않는 요청입니다.', 405);
+      const title = url.searchParams.get('title')?.trim();
+      const artist = url.searchParams.get('artist')?.trim() ?? '';
+      if (!melodyJobPath && (!title || title.length > 120 || artist.length > 120)) return fail('곡 제목을 확인해 주세요.', 400);
+      if (!env.AUTO_MELODY_ORIGIN || !env.AUTO_MELODY_TOKEN) return fail('멜로디 분석을 사용할 수 없습니다.', 503);
+      try {
+        const user = await verifyAccessCookie(request, env);
+        if (!user) return fail('로그인이 필요합니다.', 401);
+        const limitKey = melodyJobPath && request.method === 'GET'
+          ? `melody-status:${user.id}` : request.headers.get('CF-Connecting-IP') || 'unknown';
+        if (env.API_LIMIT && !(await env.API_LIMIT.limit({ key: limitKey })).success) {
+          return fail('요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.', 429);
+        }
+        const upstream = new URL(path, env.AUTO_MELODY_ORIGIN);
+        if (title) upstream.searchParams.set('title', title);
+        if (artist) upstream.searchParams.set('artist', artist);
+        const revisionBody = request.method === 'PUT' ? await request.text() : undefined;
+        if (revisionBody && revisionBody.length > 1_200_000) return fail('악보 데이터가 너무 큽니다.', 413);
+        if (melodyUpload && Number(request.headers.get('Content-Length')) > 20 * 1024 * 1024) {
+          return fail('음원 파일은 20MB 이하여야 합니다.', 413);
+        }
+        const body = melodyUpload ? request.body : revisionBody;
+        const contentType = melodyUpload ? 'application/octet-stream' : 'application/json';
+        const response = await fetch(upstream, {
+          method: request.method,
+          body,
+          headers: { Authorization: `Bearer ${env.AUTO_MELODY_TOKEN}`, ...(body ? { 'Content-Type': contentType } : {}) },
+          redirect: 'error',
+          signal: AbortSignal.timeout(melodySubmit || melodyJobPath ? 15_000 : 195_000),
+        });
+        return new Response(response.body, {
+          status: response.status,
+          headers: {
+            'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+            ...(response.headers.has('Retry-After') ? { 'Retry-After': response.headers.get('Retry-After') } : {}),
+          },
+        });
+      } catch {
+        return fail('멜로디 분석을 사용할 수 없습니다.', 502);
+      }
+    }
+    if (path === '/api/midi/search') {
+      if (request.method !== 'GET') return fail('지원하지 않는 요청입니다.', 405);
+      const title = url.searchParams.get('title')?.trim();
+      if (!title || title.length > 120) return fail('곡 제목을 확인해 주세요.', 400);
+      if (env.API_LIMIT && !(await env.API_LIMIT.limit({ key: request.headers.get('CF-Connecting-IP') || 'unknown' })).success) {
+        return fail('요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.', 429);
+      }
+      return ok(findMidiScores(title));
+    }
     if (path === '/health' && request.method === 'GET') {
       try { await env.DB.prepare('SELECT 1 AS ok').first(); return json({ status: 'ok', database: 'connected' }); }
       catch { return json({ status: 'unavailable', database: 'unavailable' }, 503); }

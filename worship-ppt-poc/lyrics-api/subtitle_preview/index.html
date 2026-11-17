@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Yebit · 자막 가사 추출</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f4f7fb; color: #172c40; font: 16px/1.55 system-ui, sans-serif; }
+    main { width: min(960px, 100% - 32px); margin: 48px auto; }
+    h1 { margin-bottom: 8px; }
+    p { margin-top: 0; }
+    .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    section { min-width: 0; background: white; border: 1px solid #dbe3ec; padding: 18px; border-radius: 14px; }
+    h2 { margin: 0 0 12px; font-size: 1rem; }
+    textarea, pre { width: 100%; min-height: 270px; max-height: 440px; margin: 0; padding: 12px; overflow: auto;
+      border: 1px solid #dbe3ec; border-radius: 8px; background: #f8fafc; color: inherit; font-size: .9rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+    textarea { resize: vertical; }
+    button { color: #fff; background: #216195; border: 1px solid transparent; border-radius: 8px; padding: 9px 12px; font: inherit; cursor: pointer; }
+    button.secondary { background: #eef4fa; color: #173b5a; border-color: #d5e2ee; }
+    button:disabled { opacity: .6; cursor: wait; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    input[type=file] { width: 100%; margin-bottom: 12px; }
+    #status { margin-top: 12px; min-height: 1.55em; }
+    #status[data-error] { color: #932b30; }
+    @media (max-width: 640px) { main { margin: 24px auto; } .panels { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>자막 가사 추출</h1>
+  <p>파싱한 자막 JSON을 올리거나 붙여 넣으세요.</p>
+  <div class="panels">
+    <section>
+      <h2><label for="subtitles">자막 JSON</label></h2>
+      <input id="file" type="file" accept=".json,application/json" aria-label="자막 JSON 파일">
+      <textarea id="subtitles" spellcheck="false"></textarea>
+      <div class="actions">
+        <button id="rules" class="secondary" type="button">규칙 정제 미리보기</button>
+        <button id="extract" type="button">모델로 가사 추출</button>
+      </div>
+      <p id="status" aria-live="polite"></p>
+    </section>
+    <section aria-labelledby="result-title">
+      <h2 id="result-title">결과</h2>
+      <pre id="result"></pre>
+    </section>
+  </div>
+</main>
+<script type="module">
+  const file = document.querySelector('#file');
+  const input = document.querySelector('#subtitles');
+  const status = document.querySelector('#status');
+  const result = document.querySelector('#result');
+  const rules = document.querySelector('#rules');
+  const extract = document.querySelector('#extract');
+
+  input.value = JSON.stringify([
+    { start: 0, duration: 2, text: '오늘 공연에 오신 분들 모두 환영합니다.' },
+    { start: 3, duration: 3, text: '♪ <i>새벽이 우리를 부르네</i>' },
+    { start: 7, duration: 3, text: '♪ 함께 걸어가는 길 (박수)' },
+    { start: 11, duration: 2, text: 'Written by Yebit' },
+  ], null, 2);
+
+  function setStatus(message, error = false) {
+    status.textContent = message;
+    status.toggleAttribute('data-error', error);
+  }
+
+  file.addEventListener('change', async () => {
+    const selected = file.files[0];
+    if (!selected) return;
+    try {
+      input.value = await selected.text();
+      setStatus('파일을 불러왔습니다.');
+    } catch {
+      setStatus('파일을 읽지 못했습니다.', true);
+    } finally {
+      file.value = '';
+    }
+  });
+
+  async function run(rulesOnly) {
+    let subtitles;
+    try {
+      subtitles = JSON.parse(input.value);
+      if (!Array.isArray(subtitles)) throw new Error();
+    } catch {
+      setStatus('자막 목록을 JSON 배열 형식으로 입력해 주세요.', true);
+      return;
+    }
+
+    result.textContent = '';
+    rules.disabled = extract.disabled = file.disabled = true;
+    input.readOnly = true;
+    setStatus('자막을 처리하는 중입니다.');
+    try {
+      const response = await fetch(location.pathname, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subtitles, rules_only: rulesOnly }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(typeof payload.detail === 'string'
+          ? payload.detail : '각 자막에 start, duration, text를 올바르게 입력해 주세요.');
+      }
+      result.textContent = payload.lyrics.join('\n');
+      setStatus(payload.lyrics.length
+        ? `${rulesOnly ? '정제된 자막' : '추출한 가사'} ${payload.lyrics.length}줄`
+        : '표시할 줄이 없습니다.');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '자막을 처리하지 못했습니다.', true);
+    } finally {
+      rules.disabled = extract.disabled = file.disabled = false;
+      input.readOnly = false;
+    }
+  }
+
+  rules.addEventListener('click', () => run(true));
+  extract.addEventListener('click', () => run(false));
+</script>
+</body>
+</html>
