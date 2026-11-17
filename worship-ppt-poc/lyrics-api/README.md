@@ -40,7 +40,7 @@ LRCLIB와 YouTube에서 가져온 가사 본문은 조회 시점에만 반환하
 
 이 API는 현재 Cloudflare Worker/D1 웹 앱과 아직 연결되지 않았습니다. FastAPI는 Cloudflare Workers에서 직접 실행할 수 없으므로, 웹 앱과 연결하려면 Python 서비스를 실행할 별도 호스트와 HTTPS 주소가 필요합니다. Genius/syncedlyrics 가사 자동 수집은 제공처의 허용된 사용 및 저장 조건이 확인되기 전까지 비활성 상태입니다.
 
-## 자막에서 가사 추출
+## 자막에서 규칙 기반 가사 추출
 
 이미 파싱한 JSON 또는 VTT 자막의 큐 목록을 Python에서 처리할 수 있습니다.
 각 큐에는 초 단위의 `start`, `duration`과 문자열 `text`를 넣습니다.
@@ -50,28 +50,30 @@ cd lyrics-api
 python -m pip install '.[subtitles]'
 ```
 
+파이프라인은 순수 Python 정규식·시간 구간 규칙만 사용합니다. OpenAI 등 외부 LLM/API
+키가 필요하지 않으며, 외부 모델에 자막을 전송하지 않습니다. YouTube 영상 자막을
+가져오는 경로에만 `yt-dlp`가 필요합니다.
+
 로컬에서 `uvicorn main:app --host 127.0.0.1 --port 8001`을 실행하고
 [자막 가사 추출 화면](http://127.0.0.1:8001/subtitle-lyrics)을 엽니다.
 Vite 개발 서버를 실행 중이라면 [localhost:5173/subtitle-lyrics](http://localhost:5173/subtitle-lyrics)에서도 열 수 있습니다.
-예제 자막으로 바로 실행하거나 JSON 파일을 올릴 수 있습니다. **규칙 정제 미리보기**에는
-API 키가 필요하지 않습니다. **모델로 가사 추출**은 아래 모델 설정을 사용합니다.
-
-로컬 LLM 호출을 위해 `lyrics-api/.env` 파일에 `OPENAI_API_KEY`를 설정합니다.
-이 파일은 Git에 포함되지 않습니다. 모델은 `LYRICS_LLM_MODEL`로 바꿀 수 있고,
-호환 서버의 주소는 `OPENAI_BASE_URL`로 지정합니다.
+예제 자막으로 바로 실행하거나 JSON 파일을 올릴 수 있고, 영상 제목을 입력하면
+초반 제목 중복 문구도 걸러냅니다.
 
 ```python
 import json
 from pathlib import Path
 
-from subtitle_lyrics import extract_clean_lyrics
+from subtitle_lyrics import LyricsFilter, extract_clean_lyrics
 
 subtitles = json.loads(Path("subtitles.json").read_text(encoding="utf-8"))
-lyrics = extract_clean_lyrics(subtitles)
+lyrics = LyricsFilter().clean(subtitles, video_title="WELOVE LIVE 축복송")
+# 같은 규칙 처리를 편의 함수로도 실행할 수 있습니다.
+lyrics = extract_clean_lyrics(subtitles, video_title="WELOVE LIVE 축복송")
 ```
 
-정제된 자막은 설정한 모델 서버에 전송됩니다. 기본값은 Structured Outputs이고,
-JSON 모드만 제공하는 서버에서는 `RuleBasedCleaner().clean(subtitles)`의 결과를
-`LLMLyricsExtractor(client=client, model="모델 이름", json_mode=True).extract(lines)`에
-전달할 수 있습니다. 가사를 찾지 못하면 빈 리스트를 반환하고, API 오류나 유효하지
-않은 모델 응답은 `LyricsExtractionError`로 알립니다.
+파이프라인은 괄호형 효과음·크레딧을 먼저 제거하고, 영상 시작 45초 이내의 3.5초 이상
+자막 공백이 나타나면 그 이전을 잘라냅니다. 이어 초반 안내 문장·방송용 어미와 영상 제목
+중복을 제한된 초반 구간에서만 필터링합니다. 결과가 없으면 빈 리스트를 반환합니다.
+
+유닛 테스트는 `python -m unittest test_subtitle_lyrics.py`로 실행할 수 있습니다.

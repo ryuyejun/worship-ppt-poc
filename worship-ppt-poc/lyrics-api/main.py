@@ -5,7 +5,6 @@ import json
 import os
 import re
 import tempfile
-import re
 import unicodedata
 import urllib.error
 import urllib.parse
@@ -21,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import DateTime, String, Text, UniqueConstraint, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
-from subtitle_lyrics import LyricsExtractionError, RuleBasedCleaner, extract_clean_lyrics
+from subtitle_lyrics import extract_clean_lyrics
 
 load_dotenv(Path(__file__).with_name(".env"))
 
@@ -86,7 +85,7 @@ class SubtitleCue(BaseModel):
 
 class SubtitleExtractionRequest(BaseModel):
     subtitles: list[SubtitleCue] = Field(max_length=5000)
-    rules_only: bool = False
+    video_title: str | None = Field(default=None, max_length=500)
 
 
 class YouTubeSubtitleRequest(BaseModel):
@@ -108,23 +107,14 @@ def subtitle_lyrics_preview(payload: SubtitleExtractionRequest) -> SubtitleExtra
         raise HTTPException(status_code=413, detail="자막이 너무 깁니다. 나눠서 입력해 주세요.")
 
     cues = [cue.model_dump() for cue in payload.subtitles]
-    if payload.rules_only:
-        return SubtitleExtractionResponse(lyrics=RuleBasedCleaner().clean(cues))
-
-    if not os.getenv("OPENAI_API_KEY"):
-        raise HTTPException(status_code=503, detail="모델로 추출하려면 서버에 OPENAI_API_KEY를 설정해 주세요.")
-
     try:
-        return SubtitleExtractionResponse(lyrics=extract_clean_lyrics(cues))
+        return SubtitleExtractionResponse(lyrics=extract_clean_lyrics(cues, payload.video_title))
     except LyricsExtractionError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
 
 
 @app.post("/subtitle-lyrics/from-youtube", response_model=SubtitleExtractionResponse)
 def subtitle_lyrics_from_youtube(payload: YouTubeSubtitleRequest) -> SubtitleExtractionResponse:
-    if not os.getenv("OPENAI_API_KEY"):
-        raise HTTPException(status_code=503, detail="자막 가사 추출용 OPENAI_API_KEY가 로컬 서버에 설정되지 않았습니다.")
-
     try:
         import yt_dlp
     except ImportError as error:
@@ -168,14 +158,18 @@ def subtitle_lyrics_from_youtube(payload: YouTubeSubtitleRequest) -> SubtitleExt
                 timing = next((index for index, line in enumerate(lines) if "-->" in line), None)
                 if timing is None:
                     continue
-                timestamp = re.match(r"(?:(\d+):)?(\d{2}):(\d{2})[.,](\d{3})", lines[timing])
-                if timestamp is None:
+                timing_match = re.match(
+                    r"(?:(\d+):)?(\d{2}):(\d{2})[.,](\d{3})\s*-->\s*(?:(\d+):)?(\d{2}):(\d{2})[.,](\d{3})",
+                    lines[timing],
+                )
+                if timing_match is None:
                     continue
-                hours = int(timestamp.group(1) or 0)
-                start = hours * 3600 + int(timestamp.group(2)) * 60 + int(timestamp.group(3)) + int(timestamp.group(4)) / 1000
+                values = [int(value or 0) for value in timing_match.groups()]
+                start = values[0] * 3600 + values[1] * 60 + values[2] + values[3] / 1000
+                end = values[4] * 3600 + values[5] * 60 + values[6] + values[7] / 1000
                 text = " ".join(lines[timing + 1:]).strip()
                 if text:
-                    subtitles.append({"start": start, "duration": 0.1, "text": text})
+                    subtitles.append({"start": start, "duration": max(0.0, end - start), "text": text})
             if not subtitles:
                 raise HTTPException(status_code=404, detail="가사로 분석할 수 있는 자막이 없습니다.")
     except HTTPException:
@@ -185,7 +179,9 @@ def subtitle_lyrics_from_youtube(payload: YouTubeSubtitleRequest) -> SubtitleExt
         raise HTTPException(status_code=502, detail="YouTube 자막을 불러오지 못했습니다.") from error
 
     try:
-        return SubtitleExtractionResponse(lyrics=extract_clean_lyrics(subtitles))
+        return SubtitleExtractionResponse(
+            lyrics=extract_clean_lyrics(subtitles, str(video.get("title") or ""))
+        )
     except LyricsExtractionError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
 

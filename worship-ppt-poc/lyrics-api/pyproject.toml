@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-subtitles = ["openai>=1.40,<3", "yt-dlp[default]>=2025.1.15"]
+subtitles = ["yt-dlp[default]>=2025.1.15"]
 
 [tool.setuptools]
 py-modules = ["main", "subtitle_lyrics"]
