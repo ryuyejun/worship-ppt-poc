@@ -105,6 +105,7 @@ export function WorshipApp() {
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
+  const [authPasswordVisible, setAuthPasswordVisible] = useState(false);
   const [authError, setAuthError] = useState('');
   const [authFieldErrors, setAuthFieldErrors] = useState<{ email?: string; password?: string }>({});
   const [authSubmitting, setAuthSubmitting] = useState(false);
@@ -933,6 +934,7 @@ export function WorshipApp() {
       const result = await authRequest<{ user: { id: number; email: string } }>(path, 'POST', { email: normalizedEmail, password: authPassword });
       setAuthUser(result.user);
       setAuthPassword('');
+      setAuthPasswordVisible(false);
       setAuthStatus('authenticated');
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : '로그인 요청을 처리하지 못했습니다.');
@@ -1070,7 +1072,7 @@ export function WorshipApp() {
               <p className="auth-form-intro">{authMode === 'login' ? '계정에 로그인해 계속 이용하세요.' : '이메일로 Yebit 계정을 만들어 보세요.'}</p>
               <form className="auth-form" noValidate onSubmit={submitAuth}>
                 <label>이메일<input type="email" name="email" autoComplete="email" required maxLength={254} value={authEmail} onChange={(event) => { setAuthEmail(event.target.value); setAuthFieldErrors((errors) => ({ ...errors, email: undefined })); setAuthError(''); }} placeholder="이메일 주소" aria-invalid={Boolean(authFieldErrors.email)} aria-describedby={authFieldErrors.email ? 'auth-email-error' : undefined} /><span id="auth-email-error" className={`auth-field-message${authFieldErrors.email ? ' is-error' : ''}`} role="status" aria-live="polite">{authFieldErrors.email || '\u00a0'}</span></label>
-                <label>비밀번호<input type="password" name="password" autoComplete={authMode === 'login' ? 'current-password' : 'new-password'} required minLength={authMode === 'signup' ? 10 : undefined} maxLength={128} value={authPassword} onChange={(event) => { setAuthPassword(event.target.value); setAuthFieldErrors((errors) => ({ ...errors, password: undefined })); setAuthError(''); }} placeholder={authMode === 'signup' ? '10자 이상 입력' : '비밀번호'} aria-invalid={Boolean(authFieldErrors.password)} aria-describedby={authFieldErrors.password ? 'auth-password-message' : authMode === 'signup' && authPassword.length > 0 && authPassword.length < 10 ? 'auth-password-message' : undefined} /><span id="auth-password-message" className={`auth-field-message${authFieldErrors.password ? ' is-error' : authMode === 'signup' && authPassword.length > 0 && authPassword.length < 10 ? ' is-hint' : ''}`} role="status" aria-live="polite">{authFieldErrors.password || (authMode === 'signup' && authPassword.length > 0 && authPassword.length < 10 ? `비밀번호를 10자 이상 입력해 주세요. (${authPassword.length}/10)` : '\u00a0')}</span></label>
+                <label>비밀번호<div className="auth-password-control"><input type={authPasswordVisible ? 'text' : 'password'} name="password" autoComplete={authMode === 'login' ? 'current-password' : 'new-password'} required minLength={authMode === 'signup' ? 10 : undefined} maxLength={128} value={authPassword} onChange={(event) => { setAuthPassword(event.target.value); setAuthFieldErrors((errors) => ({ ...errors, password: undefined })); setAuthError(''); }} placeholder={authMode === 'signup' ? '10자 이상 입력' : '비밀번호'} aria-invalid={Boolean(authFieldErrors.password)} aria-describedby={authFieldErrors.password ? 'auth-password-message' : authMode === 'signup' && authPassword.length > 0 && authPassword.length < 10 ? 'auth-password-message' : undefined} /><button className="auth-password-toggle" type="button" aria-label={authPasswordVisible ? '비밀번호 숨기기' : '비밀번호 표시'} aria-pressed={authPasswordVisible} onClick={() => setAuthPasswordVisible((visible) => !visible)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.4-6 9.5-6 9.5 6 9.5 6-3.4 6-9.5 6-9.5-6-9.5-6Z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round"/><circle cx="12" cy="12" r="2.7" fill="none" stroke="currentColor" strokeWidth="1.7"/>{authPasswordVisible && <path d="m4 4 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/>}</svg></button></div><span id="auth-password-message" className={`auth-field-message${authFieldErrors.password ? ' is-error' : authMode === 'signup' && authPassword.length > 0 && authPassword.length < 10 ? ' is-hint' : ''}`} role="status" aria-live="polite">{authFieldErrors.password || (authMode === 'signup' && authPassword.length > 0 && authPassword.length < 10 ? `비밀번호를 10자 이상 입력해 주세요. (${authPassword.length}/10)` : '\u00a0')}</span></label>
                 <p className={`auth-error${authError ? ' is-visible' : ''}`} role="alert">{authError || '\u00a0'}</p>
                 <button className="auth-submit" type="submit" disabled={authSubmitting}>{authSubmitting ? '처리 중…' : authMode === 'login' ? '로그인' : '회원가입'}</button>
               </form>
@@ -1083,7 +1085,7 @@ export function WorshipApp() {
             <h2>{authMode === 'login' ? '환영합니다' : '다시 만나 반가워요'}</h2>
             <span>{authMode === 'login' ? '계정을 만들고 예배 찬양을 위한 PPT를 준비해 보세요.' : '로그인하고 이어서 찬양 PPT를 준비하세요.'}</span>
           </div>
-          <button type="button" className="auth-mode-toggle" onClick={() => { setAuthMode((mode) => mode === 'login' ? 'signup' : 'login'); setAuthError(''); setAuthFieldErrors({}); setAuthPassword(''); }} disabled={authStatus === 'checking'}>{authMode === 'login' ? '회원가입' : '로그인'}</button>
+          <button type="button" className="auth-mode-toggle" onClick={() => { setAuthMode((mode) => mode === 'login' ? 'signup' : 'login'); setAuthError(''); setAuthFieldErrors({}); setAuthPassword(''); setAuthPasswordVisible(false); }} disabled={authStatus === 'checking'}>{authMode === 'login' ? '회원가입' : '로그인'}</button>
         </aside>
       </section>
     </main>;
