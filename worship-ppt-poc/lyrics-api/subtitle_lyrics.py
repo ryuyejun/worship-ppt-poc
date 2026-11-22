@@ -10,6 +10,8 @@ from html import unescape
 logger = logging.getLogger(__name__)
 
 _VTT_TAG = re.compile(r"</?[a-zA-Z][\w.:-]*(?:\s+[^<>]*)?\s*/?>|<\d{2}:\d{2}(?::\d{2})?\.\d{3}>")
+_LIST_NUMBER = re.compile(r"^\s*\d{1,3}\s*[.)、．]\s*")
+_NUMBER_ONLY = re.compile(r"^\s*\d{1,3}\s*[.)、．]?\s*$")
 _LINE_BREAK = re.compile(r"<br\s*/?>", re.IGNORECASE)
 _BRACKETED = re.compile(r"\[([^\[\]\n]*)\]|\(([^()\n]*)\)|\*\*([^*\n]*)\*\*")
 _DIRECTION = re.compile(
@@ -108,9 +110,10 @@ class LyricsFilter:
                 continue
             lines: list[str] = []
             for line in _normalize_text(raw):
+                line = _LIST_NUMBER.sub("", line)
                 line = _BRACKETED.sub(_remove_wrapped_direction, line).translate(_MUSIC_MARKS)
                 line = " ".join(line.split()).strip()
-                if not line or _CREDIT.search(line):
+                if not line or _NUMBER_ONLY.fullmatch(line) or _CREDIT.search(line):
                     continue
                 if any(character.isalnum() for character in line):
                     lines.append(line)
