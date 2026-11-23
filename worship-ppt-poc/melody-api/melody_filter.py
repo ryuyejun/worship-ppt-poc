@@ -10,6 +10,66 @@ PROFILES = (
 )
 
 
+def detect_vocal_bounds(events, *, min_hz=150.0, max_hz=1000.0, min_run_seconds=0.3, merge_gap_seconds=0.12):
+    """Find the first/last sustained voice-range pitch run from Basic Pitch events.
+
+    Events use Basic Pitch's ``(start, end, midi_pitch, confidence, ...)`` shape.
+    Adjacent pitch changes remain part of one vocal phrase when the gap is short.
+    """
+    pitches = []
+    for event in events:
+        try:
+            start, end, midi_pitch, strength = map(float, event[:4])
+        except (TypeError, ValueError, IndexError):
+            continue
+        frequency = 440.0 * 2 ** ((midi_pitch - 69.0) / 12.0)
+        if (start < 0 or end <= start or not min_hz <= frequency <= max_hz
+                or strength < 0.25):
+            continue
+        pitches.append((start, end))
+    pitches.sort()
+    if not pitches:
+        return None
+
+    runs = []
+    run_start, run_end = pitches[0]
+    for start, end in pitches[1:]:
+        if start <= run_end + merge_gap_seconds:
+            run_end = max(run_end, end)
+        else:
+            runs.append((run_start, run_end))
+            run_start, run_end = start, end
+    runs.append((run_start, run_end))
+    sustained = [(start, end) for start, end in runs if end - start >= min_run_seconds]
+    if not sustained:
+        return None
+    return round(sustained[0][0], 3), round(sustained[-1][1], 3)
+
+
+def filter_notes_to_vocal_bounds(
+    notes, vocal_start_sec, vocal_end_sec, *, min_note_seconds=0.15,
+    min_hz=150.0, max_hz=1000.0,
+):
+    """Clip score notes to the detected singing window and discard short noise."""
+    filtered = []
+    for source in sorted(notes, key=lambda item: item["startTime"]):
+        frequency = 440.0 * 2 ** ((float(source["pitch"]) - 69.0) / 12.0)
+        if not min_hz <= frequency <= max_hz:
+            continue
+        start = max(float(source["startTime"]), vocal_start_sec)
+        end = min(float(source["startTime"]) + float(source["duration"]), vocal_end_sec)
+        if end - start < min_note_seconds:
+            continue
+        note = {**source, "startTime": round(start, 4), "duration": round(end - start, 4)}
+        previous = filtered[-1] if filtered else None
+        if previous and previous["pitch"] == note["pitch"] and start - (previous["startTime"] + previous["duration"]) <= 0.04:
+            previous["duration"] = round(end - previous["startTime"], 4)
+            previous["amplitude"] = max(previous["amplitude"], note["amplitude"])
+        else:
+            filtered.append(note)
+    return filtered
+
+
 def normalize(values):
     mean = sum(values) / len(values)
     centered = [value - mean for value in values]

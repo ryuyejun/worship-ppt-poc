@@ -16,6 +16,9 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from starlette.concurrency import run_in_threadpool
 
 from jobs import MelodyJobs, ScoreRevision
+from notation import export_musicxml, read_midi
+from sheet_images import SHEET_CACHE_VERSION, find_score_images
+from fastapi.responses import FileResponse
 
 logger = logging.getLogger(__name__)
 cache_path = Path(os.getenv("MELODY_CACHE_PATH", "melodies.sqlite3"))
@@ -56,14 +59,20 @@ def cached_result(key, result=None):
         return json.loads(row[0]) if row else None
 
 
-def analyze(title, artist="", audio=None):
+def analyze(title, artist="", audio=None, video_id=None):
+    if not audio:
+        return find_score_images(title, artist)
     with tempfile.TemporaryDirectory(prefix="yebit-melody-") as directory:
         workdir = Path(directory)
         script = Path(__file__).with_name("transcribe.py").resolve()
+        if audio and audio[:4] == b'MThd':
+            midi = workdir / 'uploaded.mid'
+            midi.write_bytes(audio)
+            return read_midi(midi, title)
         if audio:
             (workdir / "uploaded.audio").write_bytes(audio)
         with subprocess.Popen(
-            [sys.executable, str(script), title, directory, artist], start_new_session=True,
+            [sys.executable, str(script), title, directory, artist, video_id or ""], start_new_session=True,
             stdout=subprocess.DEVNULL,
             env={**os.environ, "OMP_NUM_THREADS": os.getenv("MELODY_THREADS", "2"),
                  "OPENBLAS_NUM_THREADS": os.getenv("MELODY_THREADS", "2"),
@@ -95,7 +104,7 @@ def auto_melody(
     title = " ".join(unicodedata.normalize("NFC", title).split())
     if not title:
         raise HTTPException(400, "A song title is required")
-    key = title.casefold()
+    key = f"{SHEET_CACHE_VERSION}:{title.casefold()}"
     try:
         cached = cached_result(key)
         if cached is not None:
@@ -117,9 +126,10 @@ def auto_melody(
 
 @app.post("/api/auto-melody/jobs")
 def submit_melody(response: Response, title: str = Query(min_length=1, max_length=120),
+                  video_id: str | None = Query(default=None, pattern=r"^[A-Za-z0-9_-]{11}$"),
                   artist: str = Query(default="", max_length=120), authorization: str = Header(default="")):
     authenticate(authorization)
-    job = jobs.submit(title, artist)
+    job = jobs.submit(title, artist, video_id=video_id)
     response.status_code = 200 if job["state"] == "ready" else 202
     return job
 
@@ -150,3 +160,17 @@ def melody_job(job_id: str, authorization: str = Header(default="")):
 def revise_melody(job_id: str, edit: ScoreRevision, authorization: str = Header(default="")):
     authenticate(authorization)
     return jobs.revise(job_id, edit)
+
+
+@app.get("/api/auto-melody/jobs/{job_id}/musicxml")
+def download_musicxml(job_id: str, authorization: str = Header(default="")):
+    authenticate(authorization)
+    import re
+    if not re.fullmatch(r"[a-f0-9]{32}", job_id):
+        raise HTTPException(400, "Invalid job ID")
+    job = jobs.get(job_id)
+    if job['state'] != 'ready':
+        raise HTTPException(409, "Score is not ready")
+    destination = cache_path.parent / 'musicxml' / job_id / f"revision-{job['revision']}.musicxml"
+    export_musicxml(job['score'], destination)
+    return FileResponse(destination, media_type="application/vnd.recordare.musicxml+xml", filename="output_sheet.musicxml")

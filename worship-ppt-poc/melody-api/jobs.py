@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import re
 import sqlite3
 import subprocess
 import time
@@ -12,6 +13,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field, model_validator
 
 from melody_filter import fit_treble_register
+from sheet_images import SHEET_CACHE_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +71,7 @@ class MelodyJobs:
                     song_key TEXT UNIQUE NOT NULL,
                     title TEXT NOT NULL,
                     artist TEXT NOT NULL,
+                    video_id TEXT,
                     state TEXT NOT NULL DEFAULT 'queued',
                     updated REAL NOT NULL,
                     lease TEXT,
@@ -87,32 +90,44 @@ class MelodyJobs:
                     PRIMARY KEY (job_id, revision)
                 );
             """)
+            columns = {row[1] for row in db.execute("PRAGMA table_info(melody_jobs)")}
+            if "video_id" not in columns:
+                db.execute("ALTER TABLE melody_jobs ADD COLUMN video_id TEXT")
 
-    def submit(self, title, artist, audio=None):
+    def submit(self, title, artist, audio=None, video_id=None):
         title, artist = normalize(title), normalize(artist)
         if not title:
             raise HTTPException(400, "A song title is required")
-        # Version the identity so legacy unfiltered scores cannot serve as drafts.
+        if video_id is not None and not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+            raise HTTPException(422, "A valid YouTube video ID is required")
+        # Version the identity so scores without audio-derived vocal boundaries
+        # cannot be reused for the anchored score/caption pipeline.
         audio_hash = hashlib.sha256(audio).hexdigest() if audio else None
         song = [title.casefold(), artist.casefold(), audio_hash]
-        key = hashlib.sha256(json.dumps(["mono-v2", *song]).encode()).hexdigest()
-        previous_key = hashlib.sha256(json.dumps(["mono-v1", *song]).encode()).hexdigest()
+        key = hashlib.sha256(json.dumps([SHEET_CACHE_VERSION if not audio else "notation-v2", video_id if audio else None, *song]).encode()).hexdigest()
+        previous_key = hashlib.sha256(json.dumps(["mono-v2", *song]).encode()).hexdigest()
         with self.transaction() as db:
             # Keep user edits. Unreviewed scores from the previous model are regenerated.
             reviewed = db.execute("""
-                SELECT id FROM melody_jobs WHERE song_key=? AND state='ready' AND revision>1
+                SELECT j.id, r.result FROM melody_jobs j JOIN melody_revisions r
+                ON r.job_id=j.id AND r.revision=j.revision
+                WHERE j.song_key=? AND j.state='ready' AND j.revision>1
             """, (previous_key,)).fetchone()
             current = db.execute("SELECT id, state FROM melody_jobs WHERE song_key=?", (key,)).fetchone()
-        if reviewed:
-            return self.get(reviewed["id"])
+        if reviewed and audio:
+            legacy_score = json.loads(reviewed["result"])
+            if isinstance(legacy_score.get("vocalStartSec"), (int, float)) and isinstance(
+                legacy_score.get("vocalEndSec"), (int, float)
+            ):
+                return self.get(reviewed["id"])
         if current and current["state"] != "failed":
             return self.get(current["id"])
         with self.transaction(write=True) as db:
             db.execute("""
-                INSERT INTO melody_jobs (id, song_key, title, artist, updated) VALUES (?, ?, ?, ?, ?)
+                INSERT INTO melody_jobs (id, song_key, title, artist, video_id, updated) VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(song_key) DO UPDATE SET state='queued', updated=excluded.updated, error=NULL
                 WHERE melody_jobs.state='failed'
-            """, (uuid4().hex, key, title, artist, time.time()))
+            """, (uuid4().hex, key, title, artist, video_id, time.time()))
             job_id = db.execute("SELECT id FROM melody_jobs WHERE song_key=?", (key,)).fetchone()["id"]
             if audio and db.execute("SELECT state FROM melody_jobs WHERE id=?", (job_id,)).fetchone()["state"] == "queued":
                 db.execute("INSERT OR IGNORE INTO melody_audio VALUES (?, ?)", (job_id, audio))
@@ -130,6 +145,7 @@ class MelodyJobs:
         outcome = {"jobId": row["id"], "state": row["state"]}
         if row["result"]:
             score = json.loads(row["result"])
+            if score.get("sourceType") != "sheet-image": score["musicxmlUrl"] = f"/api/auto-melody/jobs/{job_id}/musicxml"
             if not score.get("reviewed") and "notationTransposeSemitones" not in score:
                 score["notationTransposeSemitones"] = fit_treble_register(score["notes"])
             outcome.update(revision=row["revision"], score=score)
@@ -145,7 +161,7 @@ class MelodyJobs:
                 WHERE id=(SELECT id FROM melody_jobs
                           WHERE state='queued' OR (state='running' AND updated < ?)
                           ORDER BY updated LIMIT 1)
-                RETURNING id, title, artist, lease
+                RETURNING id, title, artist, video_id, lease
             """, (now, uuid4().hex, now - 240)).fetchone()
 
     def run(self, stop, analyze, slots):
@@ -168,14 +184,21 @@ class MelodyJobs:
         try:
             with self.transaction() as db:
                 source = db.execute("SELECT content FROM melody_audio WHERE job_id=?", (job["id"],)).fetchone()
-            result = analyze(job["title"], job["artist"], source["content"] if source else None)
+            result = analyze(job["title"], job["artist"], source["content"] if source else None,
+                             job["video_id"])
+            if result and result.get('sourceType') != 'sheet-image':
+                from notation import export_musicxml
+                from pathlib import Path
+                export_musicxml(result, Path(self.path).parent / 'musicxml' / job['id'] / 'output_sheet.musicxml')
             if not result:
-                error = "이 곡의 음원 또는 주선율을 찾지 못했습니다."
+                error = "이 곡의 악보 이미지를 찾지 못했습니다."
+        except ValueError as exc:
+            error = str(exc)
         except subprocess.TimeoutExpired:
             error = "악보 분석 시간이 초과됐습니다."
         except Exception:
             logger.exception("Melody analysis failed for %s", job["id"])
-            error = "음원에서 악보를 만드는 중 오류가 발생했습니다."
+            error = "악보 이미지를 인식하는 중 오류가 발생했습니다."
         with self.transaction(write=True) as db:
             updated = db.execute("""
                 UPDATE melody_jobs SET state=?, revision=?, error=?, lease=NULL, updated=?

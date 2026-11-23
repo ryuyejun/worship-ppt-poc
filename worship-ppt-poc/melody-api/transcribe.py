@@ -6,7 +6,14 @@ import subprocess
 import sys
 import unicodedata
 
-from melody_filter import candidates_matching_voice, extract_line, fit_treble_register, quantize_key
+from melody_filter import (
+    candidates_matching_voice,
+    detect_vocal_bounds,
+    extract_line,
+    filter_notes_to_vocal_bounds,
+    fit_treble_register,
+    quantize_key,
+)
 
 
 YTDLP = [sys.executable, "-m", "yt_dlp", "--ignore-config", "--no-playlist",
@@ -19,7 +26,19 @@ def title_key(title):
     return "".join(char for char in unicodedata.normalize("NFC", title).casefold() if char.isalnum())
 
 
-def find_audio(title, directory, artist=""):
+def find_audio(title, directory, artist="", video_id=None):
+    if video_id:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+            return None
+        download = subprocess.run([
+            *YTDLP, "--max-filesize", "60M", "--match-filter", "duration <= 480 & !is_live",
+            "-f", "bestaudio", "-x", "--audio-format", "wav",
+            "-o", str(directory / "%(id)s.%(ext)s"), "--",
+            f"https://www.youtube.com/watch?v={video_id}",
+        ], check=False)
+        wav = directory / f"{video_id}.wav"
+        return (wav, True, video_id) if download.returncode == 0 and wav.is_file() else None
+
     queries = [(f"{title} 찬양", True), (f"{title} 피아노 멜로디", False)]
     if artist:
         queries.insert(0, (f"{title} {artist} 찬양", True))
@@ -70,7 +89,7 @@ def isolate_melody(wav, has_vocals, directory):
     return filtered
 
 
-def transcribe(title, directory, artist=""):
+def transcribe(title, directory, artist="", video_id=None):
     import librosa
     from basic_pitch import FilenameSuffix, build_icassp_2022_model_path
     from basic_pitch.inference import predict
@@ -86,7 +105,7 @@ def transcribe(title, directory, artist=""):
             return None
         has_vocals, video_id = True, None
     else:
-        source = find_audio(title, directory, artist)
+        source = find_audio(title, directory, artist, video_id)
         if source is None:
             return None
         wav, has_vocals, video_id = source
@@ -99,19 +118,40 @@ def transcribe(title, directory, artist=""):
         bpm = 120
 
     _, _, events = predict(melody, build_icassp_2022_model_path(FilenameSuffix.onnx), minimum_frequency=85, maximum_frequency=1050)
-    notes = extract_line(candidates_matching_voice(melody, events) if has_vocals else events)
+    voice_candidates = list(candidates_matching_voice(melody, events)) if has_vocals else []
+    vocal_bounds = detect_vocal_bounds(voice_candidates)
+    if vocal_bounds is None:
+        return None
+    vocal_start_sec, vocal_end_sec = vocal_bounds
+    notes = filter_notes_to_vocal_bounds(
+        extract_line(voice_candidates), vocal_start_sec, vocal_end_sec,
+    )
     chroma = librosa.feature.chroma_stft(y=samples, sr=rate, n_fft=4096, hop_length=1024)
     key = quantize_key(notes, chroma.mean(axis=1)) if notes else None
     if not notes:
         return None
+    # Compare repeating beat accents; meter from audio is an estimate.
+    import numpy as np
+    envelope = librosa.onset.onset_strength(y=samples, sr=rate)
+    _, beat_frames = librosa.beat.beat_track(onset_envelope=envelope, sr=rate)
+    accents = envelope[beat_frames]
+    scores = {}
+    for count in (3, 4):
+        scores[count] = max((float(np.mean(accents[phase::count])) for phase in range(count)
+                             if len(accents[phase::count]) >= 3), default=0)
+    meter_count = max(scores, key=scores.get) if max(scores.values()) else 4
     shift = fit_treble_register(notes)
-    return {"title": title, "videoId": video_id, "bpm": round(bpm, 2), "key": key, "notes": notes,
-            "notationTransposeSemitones": shift}
+    return {"title": title, "videoId": video_id, "vocalStartSec": vocal_start_sec,
+            "vocalEndSec": vocal_end_sec, "bpm": round(bpm, 2), "key": key, "notes": notes,
+            "notationTransposeSemitones": shift, "timeSignature": f"{meter_count}/4", "meterEstimated": True}
 
 
 if __name__ == "__main__":
     directory = Path(sys.argv[2]).resolve()
-    result = transcribe(sys.argv[1], directory, sys.argv[3] if len(sys.argv) > 3 else "")
+    result = transcribe(
+        sys.argv[1], directory, sys.argv[3] if len(sys.argv) > 3 else "",
+        sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] else None,
+    )
     if result is None:
         sys.exit(3)
     (directory / "result.json").write_text(json.dumps(result, ensure_ascii=False))
