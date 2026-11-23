@@ -722,7 +722,12 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
 .account-theme-setting > span { display:grid; gap:5px; }
 .account-theme-setting strong { color:var(--app-ink); font-size:14px; font-weight:550; }
 .account-theme-setting small { color:var(--app-muted); font-size:12px; line-height:1.5; }
-.account-theme-setting input { width:38px; height:22px; flex:0 0 auto; accent-color:#1879b8; cursor:pointer; }
+.account-theme-setting input { position:relative; width:52px; height:32px; flex:0 0 auto; appearance:none; border:1px solid rgba(27,43,59,.13); border-radius:999px; background:#d8dce2; padding:3px; box-shadow:inset 0 1px 2px rgba(16,28,42,.12); cursor:pointer; transition:background-color 420ms cubic-bezier(.22,.75,.25,1), border-color 420ms ease, box-shadow 420ms ease; }
+.account-theme-setting input::after { position:absolute; top:3px; left:3px; width:24px; height:24px; border-radius:50%; background:linear-gradient(180deg,#fff,#f5f6f7); box-shadow:0 1px 3px rgba(17,28,40,.25); content:''; transition:transform 420ms cubic-bezier(.22,.75,.25,1), box-shadow 420ms ease; }
+.account-theme-setting input:checked { border-color:#34c759; background:#34c759; box-shadow:inset 0 1px 2px rgba(0,0,0,.08); }
+.account-theme-setting input:checked::after { transform:translateX(20px); box-shadow:0 1px 3px rgba(0,0,0,.2); }
+.account-theme-setting input:focus-visible { outline:3px solid rgba(10,132,255,.28); outline-offset:3px; }
+html, body, .editor-page, .editor-sidebar, .editor-toolbar, .editor-stage, .editor-filmstrip, .editor-search-results, .editor-account-menu, .account-settings-dialog, .editor-size-control .editor-page-count { transition:background-color 460ms cubic-bezier(.22,.75,.25,1), color 460ms cubic-bezier(.22,.75,.25,1), border-color 460ms cubic-bezier(.22,.75,.25,1), box-shadow 460ms cubic-bezier(.22,.75,.25,1); }
 html[data-theme="dark"] { color-scheme:dark; --p-bg:#111a27; --p-surface:#192535; --p-ink:#e8eef5; --p-muted:#a3b1c0; --p-accent:#4aa9df; --p-action:#2388c5; --app-line:rgba(226,236,246,.14); --app-soft-line:rgba(226,236,246,.09); --app-card:#192535; --app-ink:#e8eef5; --app-muted:#a3b1c0; --app-accent-ink:#7fc7ed; }
 html[data-theme="dark"] body, html[data-theme="dark"] .editor-page, html[data-theme="dark"] main.editor-page > section.editor-workspace, html[data-theme="dark"] .editor-stage, html[data-theme="dark"] .editor-filmstrip { background:#0f1722; color:#e8eef5; }
 html[data-theme="dark"] .editor-sidebar, html[data-theme="dark"] .editor-toolbar { border-color:rgba(226,236,246,.12); background:rgba(20,31,45,.96); }
@@ -746,3 +751,4 @@ html[data-theme="dark"] .editor-toolbar-account .editor-account-menu button:hove
 html[data-theme="dark"] .editor-filmstrip { background:#141e2b; }
 @media (max-width:860px) { .editor-toolbar-account .editor-account-trigger > span { display:inline; } .editor-toolbar-account .editor-account-trigger > span:first-child { max-width:130px; } }
 @media (max-width:620px) { .editor-toolbar-account .editor-account-trigger { max-width:116px; padding-inline:5px; } .editor-toolbar-account .editor-account-trigger > span:first-child { max-width:92px; } }
+@media (prefers-reduced-motion: reduce) { .account-theme-setting input, .account-theme-setting input::after, html, body, .editor-page, .editor-sidebar, .editor-toolbar, .editor-stage, .editor-filmstrip, .editor-search-results, .editor-account-menu, .account-settings-dialog, .editor-size-control .editor-page-count { transition:none; } }
