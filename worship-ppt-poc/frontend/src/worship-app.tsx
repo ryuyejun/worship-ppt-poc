@@ -5,7 +5,7 @@ import { ScoreControls } from './score-controls';
 import type { ScoreSlide } from './score';
 import { api, cloudflareMode } from './api';
 import type { ApiResponse, Song, SongRequest } from './types';
-import { collectSlides, renderSlide, type Slide, type SlideSize, type SlideStyle, type SlideTextPosition } from './presentation';
+import { collectSlides, normalizeSlideOrder, renderSlide, type Slide, type SlideSize, type SlideStyle, type SlideTextPosition } from './presentation';
 
 type Notice = { text: string; kind?: 'error' | 'success' } | null;
 type RecentSong = { id: number; title: string; artist: string | null; selectedAt: number; lyrics?: string; lyricsFilteredByVocalBounds?: boolean; lyricsFromAudio?: boolean; captionFormatVersion?: number; source?: string | null; youtubeVideoId?: string; youtubePlaylistId?: string; artworkUrl?: string; artworkSourceUrl?: string; artworkContributor?: string };
@@ -17,7 +17,14 @@ type PptStyle = {
   textX: number; textY: number; textWidth: number; textHeight: number;
 };
 type Preview = { imageBase64: string; slideIndex: number; slideCount: number };
-type PptPayload = { slideSize?: SlideSize; songIds: number[]; autoMelodies?: Record<number, AutoMelody>; scorePages?: { title: string; slides: ScoreSlide[] }[]; extraSlides?: number; removedSlideIndexes?: number[]; slidePositions?: Record<number, SlideTextPosition>; slideTextOverrides?: Record<number, string>; slideTextColors?: Record<number, string>; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; pptxBase64?: string; style: PptStyle & { backgroundImageBase64?: string; backgroundImageType?: string } };
+type PptPayload = { slideSize?: SlideSize; songIds: number[]; autoMelodies?: Record<number, AutoMelody>; scorePages?: { title: string; slides: ScoreSlide[] }[]; extraSlides?: number; removedSlideIndexes?: number[]; slideOrder?: number[]; slidePositions?: Record<number, SlideTextPosition>; slideTextOverrides?: Record<number, string>; slideTextColors?: Record<number, string>; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; pptxBase64?: string; style: PptStyle & { backgroundImageBase64?: string; backgroundImageType?: string } };
+
+function moveIndexedValues<T>(values: Record<number, T>, from: number, to: number, count: number): Record<number, T> {
+  const ordered = Array.from({ length: count }, (_, index) => values[index]);
+  const [moved] = ordered.splice(from, 1);
+  ordered.splice(to, 0, moved);
+  return Object.fromEntries(ordered.flatMap((value, index) => value === undefined ? [] : [[index, value]])) as Record<number, T>;
+}
 
 function recentTitleKey(title: string) {
   return title.normalize('NFC').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
@@ -319,6 +326,10 @@ export function WorshipApp() {
   const [previewIndex, setPreviewIndex] = useState(0);
   const [extraSlideCount, setExtraSlideCount] = useState(0);
   const [removedSlideIndexes, setRemovedSlideIndexes] = useState<number[]>([]);
+  const [slideOrder, setSlideOrder] = useState<number[]>([]);
+  const [draggedSlideIndex, setDraggedSlideIndex] = useState<number | null>(null);
+  const [dropSlideIndex, setDropSlideIndex] = useState<number | null>(null);
+  const draggedSlideIndexRef = useRef<number | null>(null);
   const [slidePositions, setSlidePositions] = useState<Record<number, SlideTextPosition>>({});
   const [slideTextOverrides, setSlideTextOverrides] = useState<Record<number, string>>({});
   const [slideTextColors, setSlideTextColors] = useState<Record<number, string>>({});
@@ -331,6 +342,7 @@ export function WorshipApp() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState('');
   const [previewRetry, setPreviewRetry] = useState(0);
+  const displaySlideOrder = normalizeSlideOrder(slideOrder, prepared?.slides.length ?? preview?.slideCount ?? 0);
 
   const validStyle = Boolean(pptStyle.fontFamily.trim()) && pptStyle.fontFamily.length <= 80 && Number.isInteger(pptStyle.fontSize) && pptStyle.fontSize >= 16 && pptStyle.fontSize <= 100 && Number.isInteger(pptStyle.linesPerSlide) && pptStyle.linesPerSlide >= 1 && pptStyle.linesPerSlide <= 6;
   const favoriteSongs = allSongs.filter((song) => favoriteIds.includes(song.id));
@@ -420,6 +432,7 @@ export function WorshipApp() {
     }
     const videoId = song.youtubeVideoId ?? undefined;
     scoreNavigationPending.current = recentTitleKey(song.title);
+    setRemovedSlideIndexes([]); setSlideOrder([]);
     setSelected(items => [...items, { ...song, originalPpt: true }]);
     setActiveSong(null);
     setPptNotice(null);
@@ -522,6 +535,7 @@ export function WorshipApp() {
       ...(scorePages.length ? { scorePages } : {}),
       extraSlides: extraSlideCount,
       removedSlideIndexes,
+      slideOrder,
       slidePositions,
       slideTextOverrides,
       slideTextColors,
@@ -572,7 +586,7 @@ export function WorshipApp() {
       }
     }, 0);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [selected, pptStyle, backgroundImage, slideSize, existingPpt, existingPptData, existingPptError, validStyle, previewRetry, extraSlideCount, removedSlideIndexes, slideTextColors, scorePages, autoMelodies, slideTextOverrides]);
+  }, [selected, pptStyle, backgroundImage, slideSize, existingPpt, existingPptData, existingPptError, validStyle, previewRetry, extraSlideCount, removedSlideIndexes, slideOrder, slideTextColors, scorePages, autoMelodies, slideTextOverrides]);
 
   useEffect(() => {
     if (!prepared) return;
@@ -705,7 +719,7 @@ export function WorshipApp() {
         status:'USER_SUPPLIED',category:null,hymnNumber:null,source:'audio-upload',lyricsFromAudio:true,lyrics:lyricsPreviewText(result.lyrics.join('\n'))};
       setActiveSong(null); changeEditorTab('songs');
       setSelected(items => [...items, song]);
-      setRemovedSlideIndexes([]);setSlidePositions({});setSlideTextOverrides({});setSlideTextColors({});
+      setRemovedSlideIndexes([]); setSlideOrder([]);setSlidePositions({});setSlideTextOverrides({});setSlideTextColors({});
       const binary = Uint8Array.from(atob(result.pptxBase64), char => char.charCodeAt(0));
       const url = URL.createObjectURL(new Blob([binary],{type:'application/vnd.openxmlformats-officedocument.presentationml.presentation'}));
       const link = document.createElement('a'); link.href=url;link.download=`${song.title}.pptx`;link.click();
@@ -730,7 +744,7 @@ export function WorshipApp() {
       setPptNotice({ text: '한 번에 최대 100곡까지 선택할 수 있습니다.', kind: 'error' });
       return;
     }
-    setRemovedSlideIndexes([]); setSlidePositions({}); setSlideTextOverrides({}); setSlideTextColors({}); setEditingSlide(null);
+    setRemovedSlideIndexes([]); setSlideOrder([]); setSlidePositions({}); setSlideTextOverrides({}); setSlideTextColors({}); setEditingSlide(null);
     setSelected((items) => [...items, normalizedSong]);
     setPptNotice({ text: 'PPT 제작 목록에 추가했습니다.', kind: 'success' });
   }
@@ -738,7 +752,7 @@ export function WorshipApp() {
   addSelectionShortcut.current = addSelection;
 
   function moveSong(index: number, delta: number) {
-    setRemovedSlideIndexes([]); setSlidePositions({}); setSlideTextOverrides({}); setSlideTextColors({}); setEditingSlide(null);
+    setRemovedSlideIndexes([]); setSlideOrder([]); setSlidePositions({}); setSlideTextOverrides({}); setSlideTextColors({}); setEditingSlide(null);
     setSelected((items) => {
       const next = [...items];
       [next[index], next[index + delta]] = [next[index + delta], next[index]];
@@ -787,18 +801,40 @@ export function WorshipApp() {
   }, [selected]);
 
   function removeSlide(visibleIndex: number) {
+    const slideCount = prepared?.slides.length ?? preview?.slideCount ?? 0;
+    if (visibleIndex < 0 || visibleIndex >= slideCount) return;
+    const order = normalizeSlideOrder(slideOrder, slideCount);
+    const sourceVisibleIndex = order[visibleIndex] ?? visibleIndex;
     let originalIndex = 0;
     let visibleCount = 0;
-    while (visibleCount < visibleIndex) {
+    while (visibleCount < sourceVisibleIndex) {
       if (!removedSlideIndexes.includes(originalIndex)) visibleCount += 1;
       originalIndex += 1;
     }
     while (removedSlideIndexes.includes(originalIndex)) originalIndex += 1;
     setRemovedSlideIndexes((indexes) => [...indexes, originalIndex]);
+    setSlideOrder(order.filter(index => index !== sourceVisibleIndex).map(index => index > sourceVisibleIndex ? index - 1 : index));
     setSlideTextOverrides({});
     setSlidePositions({});
     setSlideTextColors({});
     setPreviewIndex(Math.max(0, visibleIndex - 1));
+    setSelectedTextSlide(null);
+    setEditingSlide(null);
+  }
+
+  function reorderSlides(fromIndex: number, toIndex: number) {
+    const slideCount = prepared?.slides.length ?? preview?.slideCount ?? 0;
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= slideCount || toIndex >= slideCount) return;
+    const order = normalizeSlideOrder(slideOrder, slideCount);
+    const activeSourceIndex = order[previewIndex] ?? previewIndex;
+    const nextOrder = [...order];
+    const [moved] = nextOrder.splice(fromIndex, 1);
+    nextOrder.splice(toIndex, 0, moved);
+    setSlideOrder(nextOrder);
+    setSlidePositions(values => moveIndexedValues(values, fromIndex, toIndex, slideCount));
+    setSlideTextOverrides(values => moveIndexedValues(values, fromIndex, toIndex, slideCount));
+    setSlideTextColors(values => moveIndexedValues(values, fromIndex, toIndex, slideCount));
+    setPreviewIndex(nextOrder.indexOf(activeSourceIndex));
     setSelectedTextSlide(null);
     setEditingSlide(null);
   }
@@ -1111,7 +1147,7 @@ export function WorshipApp() {
                 {editorTab === 'songs' && recentSongs.length > 0 && <section className="recent-song-section" aria-label="최근 곡">
                   <div className="recent-song-list">{recentSongs.slice(0, 5).map((recent) => { const videoId = recent.youtubeVideoId || youtubeVideos.find((video) => video.songId === recent.id)?.videoId; const imageUrl = youtubeThumbnailUrl(videoId); return <div className="recent-song-card-shell" key={`${recent.id}:${recent.title}`} role="button" tabIndex={0} aria-label={`${recent.title} 선택`} onClick={() => void openRecentSong(recent)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); void openRecentSong(recent); } }}><div className="recent-song-card">{imageUrl && <img className="recent-song-card__image" src={imageUrl} alt="" />}<span className="recent-song-card__glass"><span className="recent-song-card__title"><strong>{recent.title}</strong></span><span className="recent-song-card__meta"><small>최근 선택 · {new Date(recent.selectedAt).toLocaleDateString('ko-KR')}</small></span></span></div><button className="recent-song-delete" type="button" onClick={(event) => { event.stopPropagation(); setRecentSongs((songs) => songs.filter((song) => recentTitleKey(song.title) !== recentTitleKey(recent.title))); }} aria-label={`${recent.title} 최근 목록에서 삭제`}>×</button></div>; })}</div>
                 </section>}
-                {editorTab === 'songs' && selected.length > 0 && <section ref={selectedQueueRef} className="editor-selected-queue" aria-labelledby="editor-selected-title"><div className="editor-heading"><h2 id="editor-selected-title">제작 목록</h2><span>{selected.length}곡</span></div><ol className="selected-list">{selected.map((song, index) => <li key={song.id} data-song-id={song.id} draggable onDragStart={(event) => { draggedSongIdRef.current = song.id; originalSongOrderRef.current = selected.map((item) => item.id); setDraggedSongId(song.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', String(song.id)); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; reorderDraggedSong(song.id, event.clientY, event.currentTarget); }} onDrop={(event) => event.preventDefault()} onDragEnd={() => { if (originalSongOrderRef.current?.some((id, orderIndex) => selected[orderIndex]?.id !== id)) { setRemovedSlideIndexes([]); setSlidePositions({}); setSlideTextOverrides({}); setSlideTextColors({}); setEditingSlide(null); } draggedSongIdRef.current = null; originalSongOrderRef.current = null; setDraggedSongId(null); }} className={draggedSongId === song.id ? 'is-dragging' : ''} aria-roledescription="끌어서 순서 변경"><span className="selected-drag-handle" aria-hidden="true">⠿</span><span className="selected-index">{String(index + 1).padStart(2, '0')}</span><span className="selected-song"><strong>{song.title}</strong></span><div className="selected-actions"><button type="button" onClick={() => moveSong(index, -1)} disabled={index === 0} aria-label={`${song.title} 위로`}>↑</button><button type="button" onClick={() => moveSong(index, 1)} disabled={index === selected.length - 1} aria-label={`${song.title} 아래로`}>↓</button><button type="button" onClick={() => { setRemovedSlideIndexes([]); setSelected((items) => items.filter((item) => item.id !== song.id)); }} aria-label={`${song.title} 제거`}>×</button></div></li>)}</ol></section>}
+                {editorTab === 'songs' && selected.length > 0 && <section ref={selectedQueueRef} className="editor-selected-queue" aria-labelledby="editor-selected-title"><div className="editor-heading"><h2 id="editor-selected-title">제작 목록</h2><span>{selected.length}곡</span></div><ol className="selected-list">{selected.map((song, index) => <li key={song.id} data-song-id={song.id} draggable onDragStart={(event) => { draggedSongIdRef.current = song.id; originalSongOrderRef.current = selected.map((item) => item.id); setDraggedSongId(song.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', String(song.id)); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; reorderDraggedSong(song.id, event.clientY, event.currentTarget); }} onDrop={(event) => event.preventDefault()} onDragEnd={() => { if (originalSongOrderRef.current?.some((id, orderIndex) => selected[orderIndex]?.id !== id)) { setRemovedSlideIndexes([]); setSlideOrder([]); setSlidePositions({}); setSlideTextOverrides({}); setSlideTextColors({}); setEditingSlide(null); } draggedSongIdRef.current = null; originalSongOrderRef.current = null; setDraggedSongId(null); }} className={draggedSongId === song.id ? 'is-dragging' : ''} aria-roledescription="끌어서 순서 변경"><span className="selected-drag-handle" aria-hidden="true">⠿</span><span className="selected-index">{String(index + 1).padStart(2, '0')}</span><span className="selected-song"><strong>{song.title}</strong></span><div className="selected-actions"><button type="button" onClick={() => moveSong(index, -1)} disabled={index === 0} aria-label={`${song.title} 위로`}>↑</button><button type="button" onClick={() => moveSong(index, 1)} disabled={index === selected.length - 1} aria-label={`${song.title} 아래로`}>↓</button><button type="button" onClick={() => { setRemovedSlideIndexes([]); setSlideOrder([]); setSelected((items) => items.filter((item) => item.id !== song.id)); }} aria-label={`${song.title} 제거`}>×</button></div></li>)}</ol></section>}
               </div> : editorTab === 'favorites' ? <div className="editor-control-group">
                 <div className="editor-heading"><h2>즐겨찾기</h2><span>{favoriteSongs.length}곡</span></div>
                 {loadingSongs ? <div className="editor-library-empty"><strong>곡 목록을 확인하고 있습니다</strong></div> : !libraryError && (favoriteSongs.length === 0 ? <div className="editor-library-empty"><strong>즐겨찾는 곡이 없습니다</strong><span>곡 검색 결과에서 별표를 눌러 추가하세요.</span></div> : <div className="editor-favorite-list">{favoriteSongs.map((song) => { const artwork = favoriteArtwork[song.id]; const videoId = youtubeVideos.find((video) => video.songId === song.id)?.videoId; const imageUrl = youtubeThumbnailUrl(videoId) || (artwork?.imageUrl || undefined); const pending = pendingFavoriteRemovals.includes(song.id); return <div className="recent-song-card favorite-artwork-row" key={song.id}>{imageUrl && <img className="recent-song-card__image" src={imageUrl} alt="" />}<span className="recent-song-card__glass favorite-artwork-glass"><button className="recent-song-card__title" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong></button><span className="recent-song-card__meta"><small>{song.category?.toUpperCase() === 'HYMN' && song.hymnNumber ? `새찬송가 ${song.hymnNumber}장` : displayKnown(song.artist) || '즐겨찾기 곡'}</small></span></span><button className={`favorite-toggle favorite-artwork-toggle${pending ? '' : ' is-favorite'}`} type="button" onClick={() => toggleFavorite(song)} aria-label={pending ? `${song.title} 즐겨찾기 취소` : `${song.title} 즐겨찾기 해제`}>{pending ? '☆' : '★'}</button></div>; })}</div>)}
@@ -1156,14 +1192,14 @@ export function WorshipApp() {
             }} />}
             <div className="editor-stage">
               {previewError ? <div className="editor-canvas-message"><strong>미리보기를 열 수 없습니다</strong><span>{previewError}</span><button type="button" className="preview-retry" onClick={() => setPreviewRetry((value) => value + 1)}>다시 시도</button></div> : previewLoading && !prepared ? <div className="editor-canvas-message"><span className="preview-spinner" aria-hidden="true"/><strong>슬라이드를 불러오는 중</strong></div> : <div className="editor-page-stack" onScroll={(event) => { const cards = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[data-slide-index]')); const middle = event.currentTarget.getBoundingClientRect().top + event.currentTarget.clientHeight / 2; const nearest = cards.reduce((best, card) => Math.abs(card.getBoundingClientRect().top + card.offsetHeight / 2 - middle) < Math.abs(best.getBoundingClientRect().top + best.offsetHeight / 2 - middle) ? card : best, cards[0]); if (nearest) { setPreviewIndex(Number(nearest.dataset.slideIndex)); setSelectedTextSlide(null); } }}>
-                {(prepared?.thumbnails ?? []).map((thumbnail, slide) => { const position = slidePositions[slide] ?? prepared?.slides[slide]?.textPosition ?? { x: pptStyle.textX, y: pptStyle.textY, width: pptStyle.textWidth, height: pptStyle.textHeight }; const selectedText = selectedTextSlide === slide; const page = prepared?.slides[slide]; const scoreRows = page?.autoScore && (selectedText || editingSlide === slide || slideTextOverrides[slide] !== undefined) ? undefined : page?.scoreRows; return <div className={`editor-page-sheet ${previewIndex === slide ? 'is-current' : ''}${scoreRows?.length ? ' has-score-rows' : ''}`} data-slide-index={slide} key={slide} style={{aspectRatio:`${slideSize.width} / ${slideSize.height}`}}><img src={`data:image/png;base64,${thumbnail}`} alt="슬라이드 배경"/><div className="editor-slide-text" style={{left:`${position.x-position.width/2}%`,top:`${position.y-position.height/2}%`,width:`${position.width}%`,height:`${position.height}%`,fontFamily:pptStyle.fontFamily,fontSize:`${pptStyle.fontSize/960*100}cqw`,fontWeight:pptStyle.bold?700:400,color:slideTextColors[slide]??pptStyle.textColor,justifyContent:pptStyle.alignment==='LEFT'?'flex-start':pptStyle.alignment==='RIGHT'?'flex-end':'center',lineHeight:1.2}} onClick={() => { if (editingSlide !== slide) { setPreviewIndex(slide); setSelectedTextSlide(slide); } }} onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation(); setPreviewIndex(slide); setSelectedTextSlide(slide); setEditingSlide(slide); }} onPointerDown={(event) => { if (selectedText && editingSlide !== slide && !(event.target instanceof HTMLTextAreaElement)) startTextBoxInteraction(event, slide, position); }} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction} role="button" tabIndex={0} aria-label={`${slide+1}페이지 가사 텍스트 선택`} title="두 번 클릭하여 가사 수정">{editingSlide === slide ? <textarea className="editor-slide-textarea" autoFocus value={slideTextOverrides[slide] ?? prepared?.slides[slide]?.lines.join('\n') ?? ''} onChange={(event) => setSlideTextOverrides((items) => ({ ...items, [slide]: event.target.value }))} onPointerDown={(event) => event.stopPropagation()} onBlur={() => setEditingSlide(null)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setEditingSlide(null); } }} aria-label={`${slide+1}페이지 가사 편집`} /> : <span style={{display:'block',width:'100%',textAlign:pptStyle.alignment.toLowerCase() as CanvasTextAlign}}>{slideTextOverrides[slide] ?? prepared?.slides[slide]?.lines.join('\n')}</span>}</div>{scoreRows?.length ? <ScoreRowsOverlay rows={scoreRows} fontFamily={pptStyle.fontFamily} fontSize={pptStyle.fontSize} color={slideTextColors[slide] ?? pptStyle.textColor} bold={pptStyle.bold} onSelect={page?.autoScore ? () => { setPreviewIndex(slide); setSelectedTextSlide(slide); } : undefined} /> : null}{selectedText && !scoreRows?.length && <div className="text-box-selection" style={{left:`${position.x-position.width/2}%`,top:`${position.y-position.height/2}%`,width:`${position.width}%`,height:`${position.height}%`}} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction} role="group" aria-label="가사 상자 위치와 크기 조절"><i className="text-box-handle text-box-handle--tl"/><i className="text-box-handle text-box-handle--tr"/><i className="text-box-handle text-box-handle--bl"/><button className="text-box-handle text-box-handle--br" type="button" aria-label="가사 상자 크기 조절" onPointerDown={(event) => startTextBoxInteraction(event, slide, position, 'resize')} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction}/></div>}<span className="editor-page-label">{slide + 1} 페이지</span><button className="editor-page-delete" type="button" aria-label={`${slide + 1}페이지 삭제`} onClick={() => { let original = 0; let visible = 0; while (visible < slide) { if (!removedSlideIndexes.includes(original)) visible += 1; original += 1; } while (removedSlideIndexes.includes(original)) original += 1; setRemovedSlideIndexes((indexes) => [...indexes, original]); setSlideTextOverrides({}); setSlidePositions({}); setSlideTextColors({}); setPreviewIndex(Math.max(0, slide - 1)); setSelectedTextSlide(null); setEditingSlide(null); }}>×</button></div>; })}
+                {(prepared?.thumbnails ?? []).map((thumbnail, slide) => { const position = slidePositions[slide] ?? prepared?.slides[slide]?.textPosition ?? { x: pptStyle.textX, y: pptStyle.textY, width: pptStyle.textWidth, height: pptStyle.textHeight }; const selectedText = selectedTextSlide === slide; const page = prepared?.slides[slide]; const scoreRows = page?.autoScore && (selectedText || editingSlide === slide || slideTextOverrides[slide] !== undefined) ? undefined : page?.scoreRows; return <div className={`editor-page-sheet ${previewIndex === slide ? 'is-current' : ''}${scoreRows?.length ? ' has-score-rows' : ''}`} data-slide-index={slide} key={displaySlideOrder[slide] ?? slide} style={{aspectRatio:`${slideSize.width} / ${slideSize.height}`}}><img src={`data:image/png;base64,${thumbnail}`} alt="슬라이드 배경"/><div className="editor-slide-text" style={{left:`${position.x-position.width/2}%`,top:`${position.y-position.height/2}%`,width:`${position.width}%`,height:`${position.height}%`,fontFamily:pptStyle.fontFamily,fontSize:`${pptStyle.fontSize/960*100}cqw`,fontWeight:pptStyle.bold?700:400,color:slideTextColors[slide]??pptStyle.textColor,justifyContent:pptStyle.alignment==='LEFT'?'flex-start':pptStyle.alignment==='RIGHT'?'flex-end':'center',lineHeight:1.2}} onClick={() => { if (editingSlide !== slide) { setPreviewIndex(slide); setSelectedTextSlide(slide); } }} onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation(); setPreviewIndex(slide); setSelectedTextSlide(slide); setEditingSlide(slide); }} onPointerDown={(event) => { if (selectedText && editingSlide !== slide && !(event.target instanceof HTMLTextAreaElement)) startTextBoxInteraction(event, slide, position); }} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction} role="button" tabIndex={0} aria-label={`${slide+1}페이지 가사 텍스트 선택`} title="두 번 클릭하여 가사 수정">{editingSlide === slide ? <textarea className="editor-slide-textarea" autoFocus value={slideTextOverrides[slide] ?? prepared?.slides[slide]?.lines.join('\n') ?? ''} onChange={(event) => setSlideTextOverrides((items) => ({ ...items, [slide]: event.target.value }))} onPointerDown={(event) => event.stopPropagation()} onBlur={() => setEditingSlide(null)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setEditingSlide(null); } }} aria-label={`${slide+1}페이지 가사 편집`} /> : <span style={{display:'block',width:'100%',textAlign:pptStyle.alignment.toLowerCase() as CanvasTextAlign}}>{slideTextOverrides[slide] ?? prepared?.slides[slide]?.lines.join('\n')}</span>}</div>{scoreRows?.length ? <ScoreRowsOverlay rows={scoreRows} fontFamily={pptStyle.fontFamily} fontSize={pptStyle.fontSize} color={slideTextColors[slide] ?? pptStyle.textColor} bold={pptStyle.bold} onSelect={page?.autoScore ? () => { setPreviewIndex(slide); setSelectedTextSlide(slide); } : undefined} /> : null}{selectedText && !scoreRows?.length && <div className="text-box-selection" style={{left:`${position.x-position.width/2}%`,top:`${position.y-position.height/2}%`,width:`${position.width}%`,height:`${position.height}%`}} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction} role="group" aria-label="가사 상자 위치와 크기 조절"><i className="text-box-handle text-box-handle--tl"/><i className="text-box-handle text-box-handle--tr"/><i className="text-box-handle text-box-handle--bl"/><button className="text-box-handle text-box-handle--br" type="button" aria-label="가사 상자 크기 조절" onPointerDown={(event) => startTextBoxInteraction(event, slide, position, 'resize')} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction}/></div>}<span className="editor-page-label">{slide + 1} 페이지</span><button className="editor-page-delete" type="button" aria-label={`${slide + 1}페이지 삭제`} onClick={() => removeSlide(slide)}>×</button></div>; })}
               </div>}
             </div>
             <div className="editor-filmstrip" aria-label="슬라이드 페이지">
               {Array.from({ length: preview?.slideCount ?? 0 }, (_, slide) => {
                 const position = slidePositions[slide] ?? prepared?.slides[slide]?.textPosition ?? { x: 50, y: 50, width: 60, height: 25 };
-                return <div className={`filmstrip-page-shell ${preview?.slideIndex === slide ? 'is-active' : ''}`} key={slide}>
-                  <button className="filmstrip-page" type="button" onClick={() => { setPreviewIndex(slide); document.querySelector<HTMLElement>(`[data-slide-index="${slide}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }} disabled={!preview} aria-label={`${slide + 1}번 슬라이드 미리보기`} aria-current={preview?.slideIndex === slide ? 'page' : undefined}>
+                return <div className={`filmstrip-page-shell ${preview?.slideIndex === slide ? 'is-active' : ''}${draggedSlideIndex === slide ? ' is-dragging' : ''}${dropSlideIndex === slide ? ' is-drop-target' : ''}`} key={displaySlideOrder[slide] ?? slide} draggable={Boolean(preview)} onDragStart={(event) => { if ((event.target as HTMLElement).closest('.filmstrip-page-delete')) { event.preventDefault(); return; } draggedSlideIndexRef.current = slide; setDraggedSlideIndex(slide); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', String(slide)); const ghost = event.currentTarget.cloneNode(true) as HTMLElement; ghost.classList.remove('is-dragging', 'is-drop-target'); ghost.style.position = 'fixed'; ghost.style.left = '-10000px'; ghost.style.top = '0'; ghost.style.opacity = '1'; ghost.style.pointerEvents = 'none'; document.body.append(ghost); event.dataTransfer.setDragImage(ghost, Math.min(event.nativeEvent.offsetX, ghost.offsetWidth), Math.min(event.nativeEvent.offsetY, ghost.offsetHeight)); requestAnimationFrame(() => ghost.remove()); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; if (draggedSlideIndexRef.current !== null) setDropSlideIndex(slide); }} onDrop={(event) => { event.preventDefault(); const from = draggedSlideIndexRef.current; if (from !== null) reorderSlides(from, slide); draggedSlideIndexRef.current = null; setDraggedSlideIndex(null); setDropSlideIndex(null); }} onDragEnd={() => { draggedSlideIndexRef.current = null; setDraggedSlideIndex(null); setDropSlideIndex(null); }} aria-roledescription="끌어서 순서 변경" title="끌어서 슬라이드 순서 변경">
+                  <button className="filmstrip-page" type="button" onClick={() => { setPreviewIndex(slide); document.querySelector<HTMLElement>(`[data-slide-index="${slide}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }} disabled={!preview} aria-label={`${slide + 1}번 슬라이드 미리보기 · 끌어서 순서 변경`} aria-current={preview?.slideIndex === slide ? 'page' : undefined}>
                     <span className={`filmstrip-canvas${prepared?.slides[slide]?.scoreRows?.length ? ' has-score-rows' : ''}`}>{prepared?.thumbnails[slide] && <img src={`data:image/png;base64,${prepared.thumbnails[slide]}`} alt="" />}<span className="filmstrip-lyrics" style={{left:`${position.x-position.width/2}%`,top:`${position.y-position.height/2}%`,width:`${position.width}%`,height:`${position.height}%`,fontFamily:pptStyle.fontFamily,fontSize:`${pptStyle.fontSize/960*100}cqw`,fontWeight:pptStyle.bold?700:400,color:slideTextColors[slide]??pptStyle.textColor,textAlign:pptStyle.alignment.toLowerCase() as CanvasTextAlign}}>{slideTextOverrides[slide] ?? prepared?.slides[slide]?.lines.join('\n')}</span>{prepared?.slides[slide]?.scoreRows?.length ? <span className="filmstrip-score">{prepared.slides[slide].scoreRows.map((row, rowIndex) => <span key={rowIndex}>{row.staff && <img src={row.staff} alt="" />}<small>{row.lyrics}</small></span>)}</span> : null}</span><span className="filmstrip-number">{slide + 1}</span>
                   </button>
                   <button className="filmstrip-page-delete" type="button" onClick={() => removeSlide(slide)} aria-label={`${slide + 1}번 슬라이드 삭제`}>×</button>

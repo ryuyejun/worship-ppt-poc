@@ -5,7 +5,12 @@ import type { ScoreSlide } from './score';
 export type SlideTextPosition = { x: number; y: number; width: number; height: number };
 export type SlideStyle = { backgroundColor: string; textColor: string; fontFamily: string; fontSize: number; alignment: 'LEFT' | 'CENTER' | 'RIGHT'; linesPerSlide: number; bold: boolean; textX?: number; textY?: number; textWidth?: number; textHeight?: number; backgroundImageBase64?: string; backgroundImageType?: string };
 export type SlideSize = { width: number; height: number };
-export type PresentationInput = { slideSize?: SlideSize; songIds: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; autoMelodies?: Record<number, AutoMelody>; scorePages?: { title: string; slides: ScoreSlide[] }[]; extraSlides?: number; removedSlideIndexes?: number[]; slidePositions?: Record<number, SlideTextPosition>; slideTextOverrides?: Record<number, string>; slideTextColors?: Record<number, string>; pptxBase64?: string; style: SlideStyle };
+export type PresentationInput = { slideSize?: SlideSize; songIds: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; autoMelodies?: Record<number, AutoMelody>; scorePages?: { title: string; slides: ScoreSlide[] }[]; extraSlides?: number; removedSlideIndexes?: number[]; slideOrder?: number[]; slidePositions?: Record<number, SlideTextPosition>; slideTextOverrides?: Record<number, string>; slideTextColors?: Record<number, string>; pptxBase64?: string; style: SlideStyle };
+export function normalizeSlideOrder(order: number[] | undefined, count: number): number[] {
+  const valid = (order ?? []).filter((index, position, indexes) => Number.isInteger(index) && index >= 0 && index < count && indexes.indexOf(index) === position);
+  const included = new Set(valid);
+  return [...valid, ...Array.from({ length: count }, (_, index) => index).filter(index => !included.has(index))];
+}
 export type Slide = { scorePageImage?: string; autoScore?: boolean; title: string; lines: string[]; scoreRows?: ScoreSlide['rows']; textPosition?: SlideTextPosition; textColor?: string };
 const lyricCache = new Map<number, Song>();
 
@@ -167,7 +172,8 @@ export async function collectSlides(input: PresentationInput, signal?: AbortSign
   slides.push(...Array.from({ length: extraSlides }, () => ({ title: '', lines: [] })));
   const removed = new Set((input.removedSlideIndexes ?? []).filter(index => Number.isInteger(index) && index >= 0));
   const visibleSlides = slides.filter((_, index) => !removed.has(index));
-  const result: ScoredSlide[] = visibleSlides.length ? visibleSlides : [{ title: '', lines: [] }];
+  const orderedVisibleSlides = normalizeSlideOrder(input.slideOrder, visibleSlides.length).map(index => visibleSlides[index]);
+  const result: ScoredSlide[] = orderedVisibleSlides.length ? orderedVisibleSlides : [{ title: '', lines: [] }];
   return Promise.all(result.map(async ({ autoRows, ...slide }, index) => {
     const color = input.slideTextColors?.[index] ?? input.style.textColor;
     if (autoRows && scoreRenderer && input.slideTextOverrides?.[index] === undefined && !signal?.aborted) {
