@@ -1124,7 +1124,6 @@ export function WorshipApp() {
               <div className="editor-ppt-candidate__header">
                 <strong>{activeSong.title}</strong>
                 <div className="editor-ppt-candidate__actions">
-                  <button type="button" className="preview-retry" onClick={() => { setActiveSong(null); setMobileEditorView('songs'); }}>곡 선택으로</button>
                   <button type="button" className="btn btn--primary" disabled={Boolean(candidateAdded) || selected.length >= 100} onClick={() => addOriginalPpt(activeSong)}>
                     {candidateAdded ? '목록에 추가됨' : '곡 목록에 추가'}
                   </button>
