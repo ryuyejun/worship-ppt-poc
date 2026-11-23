@@ -318,6 +318,12 @@ export function WorshipApp() {
   const [titleEditOpen, setTitleEditOpen] = useState(false);
   const titleControlRef = useRef<HTMLDivElement | null>(null);
   const sizeControlRef = useRef<HTMLDivElement | null>(null);
+  const accountMenuRef = useRef<HTMLDivElement | null>(null);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [darkMode, setDarkMode] = useState(() => {
+    try { return window.localStorage.getItem('yebit.dark-mode') === 'true'; } catch { return false; }
+  });
   const [slideSize, setSlideSize] = useState<SlideSize>({ width:1280, height:720 });
   const [sizeOpen, setSizeOpen] = useState(false);
   const [fontQuery, setFontQuery] = useState('');
@@ -623,7 +629,7 @@ export function WorshipApp() {
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') { setNavOpen(false); setSearchOpen(false); }
+      if (event.key === 'Escape') { setNavOpen(false); setSearchOpen(false); setAccountMenuOpen(false); setSettingsOpen(false); }
     }
     document.body.classList.toggle('nav-locked', navOpen);
     document.addEventListener('keydown', closeOnEscape);
@@ -689,6 +695,19 @@ export function WorshipApp() {
     document.addEventListener('pointerdown', closeEditorMenus);
     return () => document.removeEventListener('pointerdown', closeEditorMenus);
   }, []);
+
+  useEffect(() => {
+    function closeAccountMenu(event: PointerEvent) {
+      if (!accountMenuRef.current?.contains(event.target as Node)) setAccountMenuOpen(false);
+    }
+    document.addEventListener('pointerdown', closeAccountMenu);
+    return () => document.removeEventListener('pointerdown', closeAccountMenu);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = darkMode ? 'dark' : 'light';
+    try { window.localStorage.setItem('yebit.dark-mode', String(darkMode)); } catch { /* 화면 설정은 저장할 수 없는 환경에서도 적용합니다. */ }
+  }, [darkMode]);
 
   const normalizedLiveQuery = recentTitleKey(query);
   const searchingByNumber = /^\d{1,3}$/.test(query.trim());
@@ -1161,7 +1180,7 @@ export function WorshipApp() {
           </aside>
           <section className="editor-workspace" aria-labelledby="preview-title">
             <div className="editor-toolbar"><div className="editor-toolbar__left"><div className="editor-title-control" ref={titleControlRef}><svg className="editor-title-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round"/><path d="M13 14h5m-2-2 2 2-2 2" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>{titleEditOpen ? <input className="editor-document-title-input" aria-label="프레젠테이션 제목 편집" style={{width:`${Math.max(1, presentationTitle.length)}em`}} autoFocus value={presentationTitle} onChange={(event) => setPresentationTitle(event.target.value)} maxLength={80} onBlur={() => setTitleEditOpen(false)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === 'Escape') { event.preventDefault(); setTitleEditOpen(false); } }} /> : <button className="editor-document-title" type="button" aria-label="프레젠테이션 제목 수정" aria-expanded={titleEditOpen} onClick={() => setTitleEditOpen(true)}><span>{presentationTitle.trim() || '제목 없는 디자인'}</span></button>}</div><div className="editor-size-control" ref={sizeControlRef}><button className="editor-page-count" type="button" aria-label={`슬라이드 크기 ${slideSize.width} 곱하기 ${slideSize.height} 픽셀`} aria-expanded={sizeOpen} onClick={() => setSizeOpen((open) => !open)}><span>{slideSize.width}×{slideSize.height} px</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4.5 7.5 5.5 5 5.5-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button>{sizeOpen && <div className="editor-size-menu"><div className="editor-size-presets">{[{label:'16:9',width:1280,height:720},{label:'16:10',width:1280,height:800},{label:'4:3',width:1280,height:960},{label:'1:1',width:960,height:960}].map((preset) => <button type="button" key={preset.label} aria-pressed={slideSize.width===preset.width&&slideSize.height===preset.height} onClick={() => setSlideSize({width:preset.width,height:preset.height})}>{preset.label}</button>)}</div><div className="editor-size-custom"><label>가로<input type="number" min="320" max="3840" value={slideSize.width} onChange={(event) => setSlideSize((size) => ({...size,width:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label><span>×</span><label>세로<input type="number" min="320" max="3840" value={slideSize.height} onChange={(event) => setSlideSize((size) => ({...size,height:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label></div></div>}</div></div>
-            <div className="editor-toolbar-account"><span>{authUser?.email}</span><button type="button" onClick={() => void signOut()}>로그아웃</button></div></div>
+            <div className="editor-toolbar-account"><div className="editor-account-control" ref={accountMenuRef}><button className="editor-account-trigger" type="button" aria-haspopup="menu" aria-expanded={accountMenuOpen} onClick={() => setAccountMenuOpen(open => !open)}><span>{authUser?.email ?? '계정'}</span><span className="editor-account-chevron" aria-hidden="true">⌄</span></button>{accountMenuOpen && <div className="editor-account-menu" role="menu"><button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); setSettingsOpen(true); }}><span aria-hidden="true">⚙</span> 설정</button><button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); void signOut(); }}><span aria-hidden="true">↪</span> 로그아웃</button></div>}</div></div></div>
             {activeSong && <section className="editor-ppt-candidate" aria-label="악보 PPT 미리보기">
               <div className="editor-ppt-candidate__header">
                 <strong>{activeSong.title}</strong>
@@ -1283,6 +1302,12 @@ export function WorshipApp() {
           </section>
         </main>
       )}
+      {settingsOpen && <div className="account-settings-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsOpen(false); }}>
+        <section className="account-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="account-settings-title">
+          <header><div><p>계정 설정</p><h2 id="account-settings-title">화면 설정</h2></div><button type="button" aria-label="설정 닫기" onClick={() => setSettingsOpen(false)}>×</button></header>
+          <label className="account-theme-setting"><span><strong>다크 모드</strong><small>어두운 환경에서 편하게 볼 수 있도록 화면 색상을 바꿉니다.</small></span><input type="checkbox" role="switch" checked={darkMode} onChange={(event) => setDarkMode(event.target.checked)} /></label>
+        </section>
+      </div>}
       {page === 'manage' && <footer className="app-footer closing"><span>찬양 PPT</span><span>예배 자료 제작 도구</span><a className="link" href="#create">PPT 제작</a></footer>}
     </>
   );
