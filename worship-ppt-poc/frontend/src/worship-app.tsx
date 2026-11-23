@@ -420,8 +420,23 @@ export function WorshipApp() {
   function openTrendingSong(songId: number) {
     const video = youtubeVideos.find(item => item.songId === songId);
     const song = allSongs.find(item => item.id === songId) ?? readySongs.find(item => item.id === songId);
-    if (song) selectSong(song, video?.videoId);
-    else if (video) selectSong(songFromTitle(video.title, songId), video.videoId);
+    const trendingSong = song
+      ? { ...song, youtubeVideoId: video?.videoId || song.youtubeVideoId || youtubeVideoIdFromUrl(song.source) }
+      : video ? { ...songFromTitle(video.title, songId), youtubeVideoId: video.videoId } : null;
+    if (!trendingSong) return;
+
+    const existing = selected.find(item => item.id === trendingSong.id
+      || recentTitleKey(item.title) === recentTitleKey(trendingSong.title));
+    if (existing) {
+      setActiveSong(null);
+      setMobileEditorView('slides');
+      changeEditorTab('songs');
+      setPptNotice({ text: `${existing.title}은(는) 이미 제작 목록에 있습니다.`, kind: 'success' });
+      return;
+    }
+
+    addOriginalPpt(trendingSong);
+    setPptNotice({ text: `${trendingSong.title} PPT 미리보기를 준비하고 있습니다.`, kind: 'success' });
   }
 
   function openRecentSong(recent: RecentSong) {
