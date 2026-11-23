@@ -8,7 +8,8 @@ import type { ApiResponse, Song, SongRequest } from './types';
 import { collectSlides, renderSlide, type Slide, type SlideSize, type SlideStyle, type SlideTextPosition } from './presentation';
 
 type Notice = { text: string; kind?: 'error' | 'success' } | null;
-type RecentSong = { id: number; title: string; artist: string | null; selectedAt: number; lyrics?: string; source?: string | null; youtubeVideoId?: string; artworkUrl?: string; artworkSourceUrl?: string; artworkContributor?: string };
+type RecentSong = { id: number; title: string; artist: string | null; selectedAt: number; lyrics?: string; lyricsFilteredByVocalBounds?: boolean; lyricsFromAudio?: boolean; captionFormatVersion?: number; source?: string | null; youtubeVideoId?: string; youtubePlaylistId?: string; artworkUrl?: string; artworkSourceUrl?: string; artworkContributor?: string };
+type SelectedSong = Song & { originalPpt?: boolean };
 type FavoriteArtwork = { imageUrl: string; sourceUrl?: string; contributor?: string };
 type PptStyle = {
   backgroundColor: string; textColor: string; fontFamily: string; fontSize: number;
@@ -20,6 +21,22 @@ type PptPayload = { slideSize?: SlideSize; songIds: number[]; autoMelodies?: Rec
 
 function recentTitleKey(title: string) {
   return title.normalize('NFC').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+}
+
+function lyricsPreviewText(lyrics: string) {
+  const numberMarker = /^[\s\uFEFF\u200B]*(?:\(\s*\d{1,3}\s*\)|(?:제\s*)?\d{1,3}\s*(?:[.)、．]|절[.)、．]?)|(?:verse|stanza)\s*\d{1,3}[.)、．:]?|[①②③④⑤⑥⑦⑧⑨⑩])\s*/iu;
+  const numberOnly = /^[\s\uFEFF\u200B]*(?:(?:\(\s*\d{1,3}\s*\))|(?:(?:제\s*)?\d{1,3}\s*(?:[.)、．]|절[.)、．]?)?)|(?:verse|stanza)\s*\d{1,3}[.)、．:]?|[①②③④⑤⑥⑦⑧⑨⑩])\s*$/iu;
+  return lyrics.split(/\r\n|\r|\n/).map((rawLine) => {
+    let line = rawLine.replace(/^[\s\uFEFF\u200B]*(?:\[\d{1,3}:[0-5]\d(?:[.:,]\d{1,3})?\]\s*)+/u, '').trim();
+    for (let index = 0; index < 6; index += 1) {
+      const cleaned = line
+        .replace(/^[\s\uFEFF\u200B]*(?:\[\d{1,3}:[0-5]\d(?:[.:,]\d{1,3})?\]\s*)+/u, '')
+        .replace(numberMarker, '').trim();
+      if (cleaned === line) break;
+      line = cleaned;
+    }
+    return line;
+  }).filter((line) => Boolean(line) && !numberOnly.test(line)).join('\n').trim();
 }
 
 function uniqueRecentSongs(songs: RecentSong[]) {
@@ -233,18 +250,11 @@ export function WorshipApp() {
   const addSelectionShortcut = useRef<(song: Song) => void>(() => undefined);
   const [libraryQuery, setLibraryQuery] = useState('');
   const [results, setResults] = useState<Song[]>([]);
-  const [selected, setSelected] = useState<Song[]>([]);
+  const [selected, setSelected] = useState<SelectedSong[]>([]);
   const [activeSong, setActiveSong] = useState<Song | null>(null);
-  const [showLyricsTab, setShowLyricsTab] = useState(false);
-  const lyricsRequest = useRef<AbortController | null>(null);
-  const [lyricsLoadingSongId, setLyricsLoadingSongId] = useState<number | null>(null);
-  const [lyricsLoadError, setLyricsLoadError] = useState<{ songId: number; message: string } | null>(null);
-  const [subtitleLoadingSongId, setSubtitleLoadingSongId] = useState<number | null>(null);
+  const [candidatePage, setCandidatePage] = useState(0);
   const [searchNotice, setSearchNotice] = useState<Notice>(null);
   const [pptNotice, setPptNotice] = useState<Notice>(null);
-  const [searching, setSearching] = useState(false);
-  const [providerInfo, setProviderInfo] = useState<{ title: string; artist: string; source: string; videoId?: string; url?: string; lyrics?: string }[]>([]);
-  const [externalResults, setExternalResults] = useState<Song[]>([]);
   const [creating, setCreating] = useState(false);
   const [loadingSongs, setLoadingSongs] = useState(true);
   const [requests, setRequests] = useState<SongRequest[]>([]);
@@ -261,14 +271,17 @@ export function WorshipApp() {
   const [backgroundDropActive, setBackgroundDropActive] = useState(false);
   const [imageInputKey, setImageInputKey] = useState(0);
   const [libraryError, setLibraryError] = useState('');
-  const [editorTab, setEditorTab] = useState<'songs' | 'lyrics' | 'favorites' | 'trending'>('songs');
+  const [editorTab, setEditorTab] = useState<'songs' | 'favorites' | 'trending'>('songs');
   const [youtubeVideos, setYoutubeVideos] = useState<{ videoId: string; songId: number; title: string; artworkUrl: string | null }[]>([]);
   const [youtubeStatus, setYoutubeStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [recentSongs, setRecentSongs] = useState<RecentSong[]>(() => {
     try {
       const stored = window.localStorage.getItem('yebit.recent-songs');
       const parsed: unknown = stored ? JSON.parse(stored) : [];
-      return Array.isArray(parsed) ? uniqueRecentSongs(parsed.filter((song): song is RecentSong => song && Number.isInteger(song.id) && song.id !== 0 && typeof song.title === 'string' && typeof song.selectedAt === 'number')).slice(0, 5) : [];
+      if (!Array.isArray(parsed)) return [];
+      const songs = parsed.filter((song): song is RecentSong => song && Number.isInteger(song.id)
+        && song.id !== 0 && typeof song.title === 'string' && typeof song.selectedAt === 'number');
+      return uniqueRecentSongs(songs).slice(0, 5);
     } catch {
       return [];
     }
@@ -320,21 +333,17 @@ export function WorshipApp() {
   const [previewRetry, setPreviewRetry] = useState(0);
 
   const validStyle = Boolean(pptStyle.fontFamily.trim()) && pptStyle.fontFamily.length <= 80 && Number.isInteger(pptStyle.fontSize) && pptStyle.fontSize >= 16 && pptStyle.fontSize <= 100 && Number.isInteger(pptStyle.linesPerSlide) && pptStyle.linesPerSlide >= 1 && pptStyle.linesPerSlide <= 6;
-  const favoriteSongs = readySongs.filter((song) => favoriteIds.includes(song.id));
-  const { melodies: autoMelodies, statusFor: melodyStatusFor, scoreFor, updateScore, retry: retryMelody } = useAutoMelodies(activeSong, selected);
+  const favoriteSongs = allSongs.filter((song) => favoriteIds.includes(song.id));
+  const { melodies: autoMelodies, statusFor: melodyStatusFor, scoreFor, updateScore, retry: retryMelody } = useAutoMelodies(selected, activeSong);
   const previewSong = prepared?.slides[previewIndex]?.title;
   const scoreControlSong = (previewSong ? selected.find((song) => recentTitleKey(song.title) === recentTitleKey(previewSong)) : undefined) ?? selected[0] ?? activeSong;
-  const statusSong = activeSong ?? scoreControlSong;
+  const statusSong = scoreControlSong;
+  const candidateScore = activeSong ? scoreFor(activeSong) : undefined;
+  const candidateImages = candidateScore?.sheetImages ?? [];
+  const candidateStatus = activeSong ? melodyStatusFor(activeSong) : undefined;
+  const candidateAdded = activeSong && selected.some(song => song.id === activeSong.id || recentTitleKey(song.title) === recentTitleKey(activeSong.title));
   const editableScore = scoreControlSong ? scoreFor(scoreControlSong) : undefined;
   const melodyStatus = statusSong ? melodyStatusFor(statusSong) : undefined;
-  useEffect(() => {
-    if (activeSong) {
-      setShowLyricsTab(true);
-      return;
-    }
-    const timeout = window.setTimeout(() => setShowLyricsTab(false), 280);
-    return () => window.clearTimeout(timeout);
-  }, [activeSong]);
   useEffect(() => {
     if (authStatus !== 'authenticated') return;
     let cancelled = false;
@@ -391,155 +400,53 @@ export function WorshipApp() {
     }
   }, [authStatus, youtubeVideos, favoriteArtwork]);
 
-  async function extractYouTubeSubtitleLyrics(song: Song, preferredVideoId?: string, signal?: AbortSignal) {
-    setSubtitleLoadingSongId(song.id);
-    try {
-      let videoId = preferredVideoId || youtubeVideoIdFromUrl(song.source)
-        || youtubeVideos.find((video) => video.songId === song.id)?.videoId;
-      if (!videoId && song.id > 0) {
-        const artwork = await api<{ videoId: string | null }>('/youtube-thumbnail/search', {
-          songId: song.id, title: song.title, artist: song.artist,
-        }, signal);
-        videoId = artwork.data.videoId ?? undefined;
-      }
-      if (!videoId) throw new Error('곡과 연결된 YouTube 영상을 찾지 못했습니다.');
-
-      const response = await fetch('/subtitle-lyrics/from-youtube', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ video_id: videoId }),
-        signal,
-      });
-      const payload = await response.json() as { lyrics?: string[]; detail?: string };
-      if (!response.ok) throw new Error(payload.detail || 'YouTube 자막에서 가사를 추출하지 못했습니다.');
-      if (!payload.lyrics?.length) throw new Error('영상 자막에서 가사로 판별된 줄이 없습니다.');
-
-      const updatedSong = {
-        ...song,
-        source: `https://www.youtube.com/watch?v=${videoId}`,
-        status: 'USER_SUPPLIED',
-        lyrics: payload.lyrics.join('\n'),
-      };
-      setActiveSong((current) => current?.id === song.id ? updatedSong : current);
-      setLyricsLoadError(null);
-      return updatedSong;
-    } finally {
-      setSubtitleLoadingSongId(null);
-    }
+  function selectSong(song: Song, trendingVideoId?: string) {
+    const existing = selected.find(item => item.id === song.id || recentTitleKey(item.title) === recentTitleKey(song.title));
+    const videoId = trendingVideoId || song.youtubeVideoId || youtubeVideoIdFromUrl(song.source)
+      || youtubeVideos.find(video => video.songId === song.id)?.videoId;
+    const chosen = existing ?? { ...song, youtubeVideoId: videoId };
+    retryMelody(chosen);
+    setActiveSong(chosen);
+    setCandidatePage(0);
+    setSearchOpen(false);
+    setPptNotice(null);
   }
 
-  function selectSong(song: Song, closeSearch = true, trendingVideoId?: string) {
-    lyricsRequest.current?.abort();
-    setActiveSong(song);
-    setLyricsLoadingSongId(null);
-    setLyricsLoadError(null);
-    if (song.id > 0) setSongSelectionCounts((counts) => ({ ...counts, [song.id]: (counts[song.id] ?? 0) + 1 }));
-    if (cloudflareMode && song.id > 0 && !song.lyrics?.trim()) {
-      const request = new AbortController();
-      lyricsRequest.current = request;
-      const timeout = AbortSignal.timeout(25_000);
-      setLyricsLoadingSongId(song.id);
-      void (async () => {
-        try {
-          const { data } = await api<Song>('/song-lyrics', { id: song.id, videoId: trendingVideoId }, AbortSignal.any([request.signal, timeout]));
-          if (request.signal.aborted) return;
-          if (data.id < 0) setExternalResults((songs) => [data, ...songs.filter((item) => item.id !== data.id)]);
-          setActiveSong((current) => current?.id === song.id ? data : current);
-        } catch (error) {
-          if (request.signal.aborted) return;
-          if (import.meta.env.DEV) {
-            try {
-              await extractYouTubeSubtitleLyrics(song, trendingVideoId, request.signal);
-              return;
-            } catch (subtitleError) {
-              error = subtitleError;
-            }
-          }
-          setLyricsLoadError({
-            songId: song.id,
-            message: timeout.aborted ? '가사 응답 시간이 초과됐습니다.' : error instanceof Error ? error.message : '가사를 불러오지 못했습니다.',
-          });
-        } finally {
-        if (lyricsRequest.current === request) {
-          lyricsRequest.current = null;
-          setLyricsLoadingSongId(null);
-        }
-        }
-      })();
-    }
-    changeEditorTab('lyrics');
-    if (closeSearch) setSearchOpen(false);
-    artworkAttempts.current.delete(`${song.id}:${song.title}`);
-    const matchedVideoId = trendingVideoId || youtubeVideoIdFromUrl(song.source)
-      || youtubeVideos.find((video) => video.songId === song.id)?.videoId;
-    const thumbnailUrl = youtubeThumbnailUrl(matchedVideoId);
-    if (thumbnailUrl && song.id > 0) {
-      setFavoriteArtwork((items) => ({ ...items, [song.id]: { imageUrl: thumbnailUrl } }));
-    }
-    const titleKey = recentTitleKey(song.title);
-    setRecentSongs((songs) => uniqueRecentSongs([
-      { ...songs.find((recent) => recentTitleKey(recent.title) === titleKey), id: song.id, title: song.title, artist: song.artist, selectedAt: Date.now(), ...(matchedVideoId ? { youtubeVideoId: matchedVideoId, artworkUrl: thumbnailUrl, artworkSourceUrl: undefined, artworkContributor: undefined } : {}), ...(song.id < 0 && song.lyrics ? { lyrics: song.lyrics, source: song.source } : {}) },
-      ...songs.filter((recent) => recentTitleKey(recent.title) !== titleKey),
-    ]).slice(0, 5));
-  }
-
-  async function openTrendingSong(songId: number) {
-    const trendingVideoId = youtubeVideos.find((video) => video.songId === songId)?.videoId;
-    const loadedSong = readySongs.find((song) => song.id === songId) ?? allSongs.find((song) => song.id === songId);
-    if (loadedSong) {
-      selectSong(loadedSong, true, trendingVideoId);
+  function addOriginalPpt(song: Song) {
+    if (!scoreFor(song)?.sheetImages?.length || selected.some(item => item.id === song.id || recentTitleKey(item.title) === recentTitleKey(song.title))) return;
+    if (selected.length >= 100) {
+      setPptNotice({ text: '한 번에 최대 100곡까지 선택할 수 있습니다.', kind: 'error' });
       return;
     }
-
-    try {
-      const response = await api<Song[]>('/songs');
-      setAllSongs(response.data);
-      const song = response.data.find((item) => item.id === songId);
-      if (song) selectSong(song, true, trendingVideoId);
-      else setEditorTab('songs');
-    } catch {
-      setEditorTab('songs');
-    }
+    const videoId = song.youtubeVideoId ?? undefined;
+    scoreNavigationPending.current = recentTitleKey(song.title);
+    setSelected(items => [...items, { ...song, originalPpt: true }]);
+    setActiveSong(null);
+    setPptNotice(null);
+    changeEditorTab('songs');
+    if (song.id > 0) setSongSelectionCounts(counts => ({ ...counts, [song.id]: (counts[song.id] ?? 0) + 1 }));
+    const thumbnail = youtubeThumbnailUrl(videoId);
+    if (thumbnail && song.id > 0) setFavoriteArtwork(items => ({ ...items, [song.id]: { imageUrl: thumbnail } }));
+    const recent: RecentSong = { id: song.id, title: song.title, artist: song.artist, selectedAt: Date.now(),
+      source: song.source, youtubeVideoId: videoId, artworkUrl: thumbnail };
+    setRecentSongs(items => uniqueRecentSongs([recent, ...items]).slice(0, 5));
   }
 
-  async function openRecentSong(recent: RecentSong) {
-    const loadedSong = readySongs.find((song) => song.id === recent.id) ?? allSongs.find((song) => song.id === recent.id);
-    if (loadedSong) { selectSong(loadedSong); return; }
-    if (recent.id > 0) {
-      try {
-        const response = await api<Song>('/song-lyrics', { id: recent.id });
-        selectSong(response.data);
-        return;
-      } catch {
-        setPptNotice({ text: '최근 선택한 곡을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.', kind: 'error' });
-        return;
-      }
-    }
-    if (recent.id < 0 && recent.lyrics?.trim()) {
-      selectSong({ id: recent.id, title: recent.title, artist: recent.artist, author: null, composer: null,
-        category: null, hymnNumber: null, status: 'USER_SUPPLIED', source: recent.source, lyrics: recent.lyrics });
-      return;
-    }
-    const externalSong = externalResults.find((song) => song.id === recent.id && song.title === recent.title)
-      ?? externalResults.find((song) => song.id === recent.id);
-    if (externalSong) selectSong(externalSong);
-    else if (recent.id < 0) {
-      try {
-        const response = await api<{ candidates: { title: string; artist: string; url?: string; lyrics?: string }[] }>('/providers/search', { title: recent.title });
-        const normalize = (value: string) => value.normalize('NFC').toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
-        const title = normalize(recent.title);
-        const recovered = response.data.candidates
-          .filter((candidate) => candidate.lyrics?.trim())
-          .map((candidate) => ({ candidate, normalized: normalize(candidate.title) }))
-          .filter(({ normalized }) => normalized.includes(title) || title.includes(normalized))
-          .sort((left, right) => right.candidate.lyrics!.length - left.candidate.lyrics!.length)[0]?.candidate;
-        if (!recovered?.lyrics) throw new Error('최근 곡의 가사를 다시 찾지 못했습니다. 곡을 검색해 주세요.');
-        selectSong({ id: recent.id, title: recent.title, artist: recent.artist || recovered.artist, author: null, composer: null,
-          category: null, hymnNumber: null, status: 'USER_SUPPLIED', source: recovered.url, lyrics: recovered.lyrics });
-      } catch (error) {
-        setPptNotice({ text: error instanceof Error ? error.message : '최근 곡을 다시 불러오지 못했습니다.', kind: 'error' });
-      }
-    } else setPptNotice({ text: '최근 선택한 곡을 다시 불러오지 못했습니다.', kind: 'error' });
+  function openTrendingSong(songId: number) {
+    const video = youtubeVideos.find(item => item.songId === songId);
+    const song = allSongs.find(item => item.id === songId) ?? readySongs.find(item => item.id === songId);
+    if (song) selectSong(song, video?.videoId);
+    else if (video) selectSong(songFromTitle(video.title, songId), video.videoId);
+  }
+
+  function openRecentSong(recent: RecentSong) {
+    const song = allSongs.find(item => item.id === recent.id) ?? readySongs.find(item => item.id === recent.id);
+    selectSong(song ?? { ...songFromTitle(recent.title, recent.id), artist: recent.artist, source: recent.source },
+      recent.youtubeVideoId);
+  }
+
+  function songFromTitle(title: string, id = -Date.now()): Song {
+    return { id, title, artist: null, author: null, composer: null, category: null, hymnNumber: null, status: '' };
   }
 
   async function loadSongArtwork(song: Pick<Song, 'id' | 'title'> & { artist?: string | null }) {
@@ -599,8 +506,7 @@ export function WorshipApp() {
     setFavoriteIds((ids) => [...ids, song.id]);
   }
 
-  function changeEditorTab(tab: 'songs' | 'lyrics' | 'favorites' | 'trending') {
-    if (editorTab === 'lyrics' && tab !== 'lyrics') setActiveSong(null);
+  function changeEditorTab(tab: 'songs' | 'favorites' | 'trending') {
     if (editorTab === 'favorites' && tab !== 'favorites' && pendingFavoriteRemovals.length) {
       setFavoriteIds((ids) => ids.filter((id) => !pendingFavoriteRemovals.includes(id)));
       setPendingFavoriteRemovals([]);
@@ -611,7 +517,7 @@ export function WorshipApp() {
   function presentationPayload(): PptPayload {
     return {
       slideSize,
-      songIds: selected.map((song) => song.id),
+      songIds: selected.filter(song => !song.originalPpt || autoMelodies[song.id]?.sheetImages?.length).map(song => song.id),
       autoMelodies,
       ...(scorePages.length ? { scorePages } : {}),
       extraSlides: extraSlideCount,
@@ -686,12 +592,12 @@ export function WorshipApp() {
   useEffect(() => {
     const target = scoreNavigationPending.current;
     if (!target || !prepared) return;
-    const scoreIndex = prepared.slides.findIndex((slide) => slide.scoreRows?.length && recentTitleKey(slide.title) === target);
+    const scoreIndex = prepared.slides.findIndex((slide) => (slide.scorePageImage || slide.scoreRows?.length) && recentTitleKey(slide.title) === target);
     if (scoreIndex < 0) return;
     scoreNavigationPending.current = '';
     setPreviewIndex(scoreIndex);
     requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-slide-index="${scoreIndex}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
-  }, [prepared]);
+  }, [prepared, activeSong]);
 
   useEffect(() => {
     function syncPage() {
@@ -770,96 +676,50 @@ export function WorshipApp() {
     return () => document.removeEventListener('pointerdown', closeEditorMenus);
   }, []);
 
-  async function searchSongs(event: React.FormEvent<HTMLFormElement>) {
+  const normalizedLiveQuery = recentTitleKey(query);
+  const searchingByNumber = /^\d{1,3}$/.test(query.trim());
+  const libraryMatches = normalizedLiveQuery ? [...new Map([...readySongs, ...allSongs].map(song => [song.id, song])).values()]
+    .filter(song => searchingByNumber ? song.hymnNumber === Number(query) :
+      [song.title, song.artist, song.author, song.composer].some(value => value && recentTitleKey(value).includes(normalizedLiveQuery)))
+    .sort((a, b) => Number(recentTitleKey(b.title) === normalizedLiveQuery) - Number(recentTitleKey(a.title) === normalizedLiveQuery)) : [];
+  const additionalLiveSongMatches = libraryMatches.filter(song => !results.some(result => result.id === song.id)).slice(0, 6);
+
+  function searchSongs(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!query.trim()) return;
-    setSearching(true); setResults([]); setExternalResults([]); setProviderInfo([]); setActiveSong(null); setSearchNotice(null);
-    const messages: string[] = [];
-    try {
-      if (cloudflareMode && /^\d{1,3}$/.test(query.trim())) {
-        try {
-          const local = await api<Song[]>('/search', { title: query.trim() });
-          setResults(local.data);
-          if (local.data.length === 1) selectSong(local.data[0], false);
-          setSearchNotice({ text: local.data.length ? `찬송가 ${local.data.length}곡을 찾았습니다` : '찬송가를 찾지 못해 대기열에 기록했습니다' });
-          if (!local.data.length) await loadRequests();
-        } catch { setSearchNotice({ text: '찬송가를 불러오지 못했습니다.', kind: 'error' }); }
-        return;
-      }
-      let localSongs: Song[] = [];
-      try {
-        const local = await api<Song[]>('/search', { title: query.trim() });
-        localSongs = local.data;
-        setResults(localSongs);
-        messages.push(`내 DB: 가사 ${localSongs.length}곡`);
-        if (localSongs.length === 1) selectSong(localSongs[0], false);
-        if (!localSongs.length) {
-          if (cloudflareMode && !local.headers.has('X-Request-Count')) messages.push('저장된 가사를 찾지 못했습니다');
-          else { messages.push('곡 추가 대기열에 기록했습니다'); await loadRequests(); }
-        }
-      } catch { messages.push('내 DB: 조회 실패'); }
-      let found: Song[] = [];
-      try {
-        const headers = { 'X-User-Agent': 'WorshipPPT/1.0 (https://github.com/ryuyejun/worship-ppt-poc)' };
-        const fetchLrclib = async (key: 'track_name' | 'artist_name' | 'q', value: string) => {
-          const url = new URL('https://lrclib.net/api/search');
-          url.searchParams.set(key, value);
-          const response = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
-          if (!response.ok) throw new Error('요청 실패');
-          return await response.json() as { id: number; trackName: string; artistName: string; albumName: string; plainLyrics: string | null; syncedLyrics: string | null }[];
-        };
-        const original = query.trim().normalize('NFC');
-        const corrected = original.replace(/하나님(?=\s|$)/g, '하나님의');
-        const searches = [fetchLrclib('track_name', original), fetchLrclib('artist_name', original), fetchLrclib('q', original)];
-        if (corrected !== original) searches.push(fetchLrclib('q', corrected));
-        const responses = await Promise.allSettled(searches);
-        const successful = responses.filter((response): response is PromiseFulfilledResult<Awaited<ReturnType<typeof fetchLrclib>>> => response.status === 'fulfilled');
-        if (!successful.length) throw new Error('요청 실패');
-        const records = successful.flatMap((response) => response.value);
-        const unique = new Set<string>();
-        found = records.filter((record) => {
-          if (!record.plainLyrics?.trim() && !record.syncedLyrics?.trim()) return false;
-          const key = [record.trackName, record.artistName].map((value) => (value || '').normalize('NFC').toLowerCase().replace(/\s+/g, '')).join('|');
-          if (unique.has(key)) return false;
-          unique.add(key); return true;
-        }).map((record) => ({
-          id: -record.id, title: record.trackName, author: null, composer: null, artist: record.artistName,
-          status: 'USER_SUPPLIED', category: null, hymnNumber: null, source: 'https://lrclib.net', album: record.albumName,
-          lyrics: (record.plainLyrics || record.syncedLyrics?.replace(/^\[\d{2}:\d{2}(?:\.\d+)?\]\s*/gm, '') || '').trim(),
-        }));
-        messages.push(`LRCLIB: 가사 ${found.length}곡`);
-      } catch { messages.push('LRCLIB: 연결 실패'); }
-      const normalizeSearchTitle = (value: string) => value.normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
-      const localKeys = new Set(localSongs.map((song) => `${normalizeSearchTitle(song.title)}|${normalizeSearchTitle(song.artist || '')}`));
-      found = found.filter((song) => !localKeys.has(`${normalizeSearchTitle(song.title)}|${normalizeSearchTitle(song.artist || '')}`));
-      setExternalResults(found);
-      try {
-        const providers = await api<{ candidates: { title: string; artist: string; source: string; videoId?: string; url?: string; lyrics?: string }[]; status: string[] }>('/providers/search', { title: query.trim() });
-        const knownTitles = [...found, ...localSongs].map((song) => normalizeSearchTitle(song.title)).filter((title) => title.length >= 3);
-        const uniqueVideoTitles = new Set<string>();
-        const videos = providers.data.candidates.filter((candidate) => {
-          const title = normalizeSearchTitle(candidate.title);
-          if (!candidate.lyrics?.trim() || !title || uniqueVideoTitles.has(title) || knownTitles.some((known) => title.includes(known))) return false;
-          uniqueVideoTitles.add(title);
-          return true;
-        });
-        setProviderInfo(videos);
-        messages.push(...providers.data.status, `중복 제외 후 ${videos.length}개 표시`);
-      } catch { messages.push('곡 목록 또는 YouTube 검색을 불러오지 못했습니다'); }
-      setSearchNotice({ text: messages.join(' · ') });
-    } finally { setSearching(false); }
+    if (!normalizedLiveQuery) return;
+    setResults(libraryMatches);
+    setSearchNotice({ text: libraryMatches.length || !searchingByNumber
+      ? '미리 볼 곡을 선택해 주세요.' : '이 번호에 해당하는 찬송가를 찾지 못했습니다.' });
   }
 
-  const normalizedLiveQuery = query.normalize('NFC').toLocaleLowerCase().replace(/\s+/g, '');
-  const liveSongMatches = normalizedLiveQuery ? readySongs.filter((song) => [song.title, song.author, song.artist, song.composer, song.hymnNumber?.toString()]
-    .filter(Boolean).join(' ').normalize('NFC').toLocaleLowerCase().replace(/\s+/g, '').includes(normalizedLiveQuery))
-    .sort((a, b) => Number(b.hymnNumber?.toString() === normalizedLiveQuery) - Number(a.hymnNumber?.toString() === normalizedLiveQuery)).slice(0, 6) : [];
-  const additionalLiveSongMatches = liveSongMatches.filter((song) => !results.some((result) => result.id === song.id));
+  async function uploadLyricsAudio(file: File) {
+    if (!file.size || file.size > 20 * 1024 * 1024) {
+      setPptNotice({text:'20MB 이하 음원 파일을 선택해 주세요.',kind:'error'}); return;
+    }
+    setPptNotice({text:'음원 가사를 분석하고 PPT를 만들고 있습니다.'});
+    try {
+      const response = await fetch('/api/audio-lyrics', {method:'POST',body:file,signal:AbortSignal.timeout(300000)});
+      const result = await response.json() as {lyrics?:string[];pptxBase64?:string;cacheHit?:boolean;timings?:{total:number};detail?:string;error?:string};
+      if (!response.ok || !result.lyrics?.length || !result.pptxBase64) throw new Error(result.error || result.detail || '음원에서 가사를 가져오지 못했습니다.');
+      const song: Song = {id:-Date.now(),title:file.name.replace(/\.[^.]+$/, ''),artist:null,author:null,composer:null,
+        status:'USER_SUPPLIED',category:null,hymnNumber:null,source:'audio-upload',lyricsFromAudio:true,lyrics:lyricsPreviewText(result.lyrics.join('\n'))};
+      setActiveSong(null); changeEditorTab('songs');
+      setSelected(items => [...items, song]);
+      setRemovedSlideIndexes([]);setSlidePositions({});setSlideTextOverrides({});setSlideTextColors({});
+      const binary = Uint8Array.from(atob(result.pptxBase64), char => char.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([binary],{type:'application/vnd.openxmlformats-officedocument.presentationml.presentation'}));
+      const link = document.createElement('a'); link.href=url;link.download=`${song.title}.pptx`;link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 10000);
+      setPptNotice({text:`${result.cacheHit ? '저장된 가사 사용' : '가사 추출 완료'} · ${(result.timings?.total ?? 0).toFixed(2)}초 · PPT 생성 완료`,kind:'success'});
+    } catch(error) {
+      setPptNotice({text:error instanceof Error ? error.message : '음원 처리에 실패했습니다.',kind:'error'});
+    }
+  }
 
   function addSelection(song: Song) {
-    if (lyricsLoadingSongId === song.id) return;
-    if (song.status !== 'USER_SUPPLIED' || (song.lyrics != null && !song.lyrics.trim())) {
-      setPptNotice({ text: '가사가 저장된 곡만 PPT에 추가할 수 있습니다.', kind: 'error' });
+    const normalizedSong = { ...song, lyrics: lyricsPreviewText(song.lyrics ?? '') };
+    if (!normalizedSong.lyrics.trim()) {
+      setPptNotice({ text: '이 기능으로 슬라이드를 만들려면 가사가 필요합니다.', kind: 'error' });
       return;
     }
     if (selected.some((item) => item.id === song.id)) {
@@ -871,7 +731,7 @@ export function WorshipApp() {
       return;
     }
     setRemovedSlideIndexes([]); setSlidePositions({}); setSlideTextOverrides({}); setSlideTextColors({}); setEditingSlide(null);
-    setSelected((items) => [...items, song]);
+    setSelected((items) => [...items, normalizedSong]);
     setPptNotice({ text: 'PPT 제작 목록에 추가했습니다.', kind: 'success' });
   }
 
@@ -1051,6 +911,12 @@ export function WorshipApp() {
   }
 
   async function createPpt() {
+    const unavailable = selected.find(song => song.originalPpt && !autoMelodies[song.id]?.sheetImages?.length);
+    if (unavailable) {
+      const status = melodyStatusFor(unavailable);
+      setPptNotice({ text: `${unavailable.title} · ${status?.message ?? 'PPT를 불러오는 중입니다.'}`, kind: 'error' });
+      return;
+    }
     if (existingPpt && (!existingPpt.name.toLowerCase().endsWith('.pptx') || existingPpt.size > 20_000_000)) {
       setPptNotice({ text: '20MB 이하의 PPTX 파일을 선택해 주세요.', kind: 'error' });
       return;
@@ -1106,7 +972,7 @@ export function WorshipApp() {
       }
       if (commandKey && !event.altKey && event.key === 'Enter' && activeSong) {
         event.preventDefault();
-        addSelectionShortcut.current(activeSong);
+        addOriginalPpt(activeSong);
         return;
       }
       if (page === 'create' && prepared?.slides.length && (event.key === 'PageDown' || event.key === 'PageUp')) {
@@ -1118,7 +984,7 @@ export function WorshipApp() {
 
     document.addEventListener('keydown', handleEditorShortcuts);
     return () => document.removeEventListener('keydown', handleEditorShortcuts);
-  }, [activeSong, page, prepared]);
+  }, [activeSong, candidateScore, selected, page, prepared]);
 
   async function importFiles(event: React.ChangeEvent<HTMLInputElement>) {
     const files = [...(event.target.files ?? [])];
@@ -1222,17 +1088,16 @@ export function WorshipApp() {
               </button> : <div className={`editor-search-widget is-active${query.trim() ? ' has-query' : ''}`}>
                 <form className="editor-search" onSubmit={searchSongs}>
                   <label className="visually-hidden" htmlFor="worship-song-search">곡 제목 또는 찬송가 번호</label>
-                  <span className="editor-search-input"><img src="/assets/figma/search.svg" alt="" /><input id="worship-song-search" ref={searchInputRef} autoComplete="off" value={query} onChange={(event) => { setQuery(event.target.value); setSearchNotice(null); setResults([]); setExternalResults([]); setProviderInfo([]); }} placeholder="곡 제목 또는 찬송가 번호" /></span>
-                  <button className="visually-hidden" type="submit" disabled={searching || !query.trim()}>검색</button>
+                  <span className="editor-search-input"><img src="/assets/figma/search.svg" alt="" /><input id="worship-song-search" ref={searchInputRef} autoComplete="off" value={query} onChange={(event) => { setQuery(event.target.value); setSearchNotice(null); setResults([]); }} placeholder="곡 제목 또는 찬송가 번호" /></span>
+                  <button className="visually-hidden" type="submit" disabled={!query.trim()}>검색</button>
                 </form>
                 {query.trim() && <div className="editor-search-results" aria-live="polite">
-                  {additionalLiveSongMatches.length > 0 && <div className="search-result-group"><span>내 곡 목록</span>{additionalLiveSongMatches.map((song) => <div className="editor-favorite-row" key={song.id}><button className="search-result-row" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>{displayKnown(song.artist)}</small></button><button className={`favorite-toggle${favoriteIds.includes(song.id) ? ' is-favorite' : ''}`} type="button" onClick={() => toggleFavorite(song)} aria-label={favoriteIds.includes(song.id) ? `${song.title} 즐겨찾기 해제` : `${song.title} 즐겨찾기 추가`}>{favoriteIds.includes(song.id) ? '★' : '☆'}</button></div>)}</div>}
-                  {searching && <p className="search-result-hint">곡을 찾고 있습니다…</p>}
-                  {!searching && !searchNotice && <p className="search-result-hint">Enter를 누르면 전체 검색을 시작합니다.</p>}
+                  {!searchNotice && <p className="search-result-hint">곡을 클릭해 PPT를 미리 볼 수 있습니다.</p>}
+                  {!searchingByNumber && normalizedLiveQuery && !libraryMatches.some(song => recentTitleKey(song.title) === normalizedLiveQuery) &&
+                    <button className="search-result-row" type="button" onClick={() => selectSong(songFromTitle(query.trim().slice(0, 120)))}><strong>{query.trim()}</strong><small>제목으로 악보 PPT 찾기</small></button>}
                   {searchNotice && <p className={`search-result-hint ${searchNotice.kind ?? ''}`}>{searchNotice.text}</p>}
-                  {providerInfo.length > 0 && <div className="search-result-group"><span>YouTube에서 찾은 가사 · {providerInfo.length}곡</span>{providerInfo.map((song, index) => <button className="search-result-row" key={`${song.videoId || song.source}-${index}`} type="button" onClick={() => selectSong({ id: -(100000000 + index), title: song.title, artist: song.artist || null, author: null, composer: null, category: null, hymnNumber: null, status: 'USER_SUPPLIED', source: song.url, lyrics: song.lyrics })}><strong>{song.title}</strong><small>{song.artist} · 가사 미리보기</small></button>)}</div>}
-                  {externalResults.length > 0 && <div className="search-result-group"><span>LRCLIB 검색 결과 · {externalResults.length}</span>{externalResults.map((song) => <button className="search-result-row" key={song.id} type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>{displayPerson(song.artist)} · {displayPerson(song.album)}</small></button>)}</div>}
                   {results.length > 0 && <div className="search-result-group"><span>내 곡 목록 · {results.length}</span>{results.map((song) => <div className="editor-favorite-row" key={song.id}><button className="search-result-row" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>작사 {displayPerson(song.author)}</small></button><button className={`favorite-toggle${favoriteIds.includes(song.id) ? ' is-favorite' : ''}`} type="button" onClick={() => toggleFavorite(song)} aria-label={favoriteIds.includes(song.id) ? `${song.title} 즐겨찾기 해제` : `${song.title} 즐겨찾기 추가`}>{favoriteIds.includes(song.id) ? '★' : '☆'}</button></div>)}</div>}
+                  {additionalLiveSongMatches.length > 0 && <div className="search-result-group"><span>내 곡 목록</span>{additionalLiveSongMatches.map((song) => <div className="editor-favorite-row" key={song.id}><button className="search-result-row" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>{displayKnown(song.artist)}</small></button><button className={`favorite-toggle${favoriteIds.includes(song.id) ? ' is-favorite' : ''}`} type="button" onClick={() => toggleFavorite(song)} aria-label={favoriteIds.includes(song.id) ? `${song.title} 즐겨찾기 해제` : `${song.title} 즐겨찾기 추가`}>{favoriteIds.includes(song.id) ? '★' : '☆'}</button></div>)}</div>}
                 </div>}
               </div>}
             </div>
@@ -1240,14 +1105,12 @@ export function WorshipApp() {
               <button type="button" aria-pressed={editorTab === 'songs'} onClick={() => changeEditorTab('songs')}>최근</button>
               <button type="button" aria-pressed={editorTab === 'favorites'} onClick={() => changeEditorTab('favorites')}>즐겨찾기</button>
               <button type="button" aria-pressed={editorTab === 'trending'} onClick={() => changeEditorTab('trending')}>트렌드</button>
-              {showLyricsTab && <button className={`editor-tab--lyrics${activeSong ? '' : ' is-leaving'}`} type="button" aria-pressed={editorTab === 'lyrics'} onClick={() => changeEditorTab('lyrics')}>가사</button>}
             </div>
             <div className="editor-controls">
-              {editorTab === 'songs' || editorTab === 'lyrics' ? <div className="editor-control-group">
+              {editorTab === 'songs' ? <div className="editor-control-group">
                 {editorTab === 'songs' && recentSongs.length > 0 && <section className="recent-song-section" aria-label="최근 곡">
                   <div className="recent-song-list">{recentSongs.slice(0, 5).map((recent) => { const videoId = recent.youtubeVideoId || youtubeVideos.find((video) => video.songId === recent.id)?.videoId; const imageUrl = youtubeThumbnailUrl(videoId); return <div className="recent-song-card-shell" key={`${recent.id}:${recent.title}`} role="button" tabIndex={0} aria-label={`${recent.title} 선택`} onClick={() => void openRecentSong(recent)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); void openRecentSong(recent); } }}><div className="recent-song-card">{imageUrl && <img className="recent-song-card__image" src={imageUrl} alt="" />}<span className="recent-song-card__glass"><span className="recent-song-card__title"><strong>{recent.title}</strong></span><span className="recent-song-card__meta"><small>최근 선택 · {new Date(recent.selectedAt).toLocaleDateString('ko-KR')}</small></span></span></div><button className="recent-song-delete" type="button" onClick={(event) => { event.stopPropagation(); setRecentSongs((songs) => songs.filter((song) => recentTitleKey(song.title) !== recentTitleKey(recent.title))); }} aria-label={`${recent.title} 최근 목록에서 삭제`}>×</button></div>; })}</div>
                 </section>}
-                {editorTab === 'lyrics' && activeSong && <article className="song-detail" aria-live="polite"><div className="detail-title"><div><p className="eyebrow">선택한 찬양</p><h3>{activeSong.title}</h3></div><div className="detail-actions">{activeSong.id > 0 && <button className={`favorite-toggle${favoriteIds.includes(activeSong.id) ? ' is-favorite' : ''}`} type="button" onClick={() => toggleFavorite(activeSong)} aria-label={favoriteIds.includes(activeSong.id) ? '즐겨찾기 해제' : '즐겨찾기 추가'}>{favoriteIds.includes(activeSong.id) ? '★' : '☆'}</button>}<button className="icon-button" onClick={() => { setActiveSong(null); setEditorTab('songs'); }} aria-label="선택한 곡 닫기">×</button></div></div><dl className="song-meta"><div><dt>공연팀</dt><dd>{displayPerson(activeSong.artist)}</dd></div></dl><div className="lyrics-preview"><span>가사 미리보기</span><p>{activeSong.lyrics?.trim() ? <>{activeSong.id < 0 ? activeSong.lyrics.trim() : activeSong.lyrics.trim().slice(0, 520)}{activeSong.id > 0 && activeSong.lyrics.length > 520 ? '…' : ''}</> : lyricsLoadingSongId === activeSong.id || subtitleLoadingSongId === activeSong.id ? '가사를 불러오는 중입니다.' : lyricsLoadError?.songId === activeSong.id ? lyricsLoadError.message : '이 곡은 아직 가사가 등록되어 있지 않습니다.'}</p></div>{activeSong.id < 0 && <p className="editor-hint">{activeSong.source?.includes('youtube.com') ? 'YouTube 영상 설명란에서 찾은 가사 후보입니다. 곡과 가사를 확인한 뒤 사용해 주세요. DB에는 저장되지 않습니다.' : 'LRCLIB 제공 가사입니다. 곡과 가사를 확인하고 이용 권한이 있는 경우에 사용해 주세요. DB에는 저장되지 않습니다.'}</p>}{import.meta.env.DEV && <button type="button" className="btn btn--secondary" disabled={subtitleLoadingSongId === activeSong.id} onClick={() => void extractYouTubeSubtitleLyrics(activeSong).catch((error: unknown) => setLyricsLoadError({ songId: activeSong.id, message: error instanceof Error ? error.message : 'YouTube 자막에서 가사를 추출하지 못했습니다.' }))}>{subtitleLoadingSongId === activeSong.id ? 'YouTube 자막 분석 중' : 'YouTube 자막으로 가사 확인'}</button>}{lyricsLoadError?.songId === activeSong.id && <button type="button" className="btn btn--secondary" onClick={() => selectSong(activeSong)}>가사 다시 불러오기</button>}<button className="btn btn--secondary add-button" disabled={lyricsLoadingSongId === activeSong.id || subtitleLoadingSongId === activeSong.id} onClick={() => addSelection(activeSong)}>{lyricsLoadingSongId === activeSong.id || subtitleLoadingSongId === activeSong.id ? '가사를 불러오는 중' : '제작 목록에 추가'}</button></article>}
                 {editorTab === 'songs' && selected.length > 0 && <section ref={selectedQueueRef} className="editor-selected-queue" aria-labelledby="editor-selected-title"><div className="editor-heading"><h2 id="editor-selected-title">제작 목록</h2><span>{selected.length}곡</span></div><ol className="selected-list">{selected.map((song, index) => <li key={song.id} data-song-id={song.id} draggable onDragStart={(event) => { draggedSongIdRef.current = song.id; originalSongOrderRef.current = selected.map((item) => item.id); setDraggedSongId(song.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', String(song.id)); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; reorderDraggedSong(song.id, event.clientY, event.currentTarget); }} onDrop={(event) => event.preventDefault()} onDragEnd={() => { if (originalSongOrderRef.current?.some((id, orderIndex) => selected[orderIndex]?.id !== id)) { setRemovedSlideIndexes([]); setSlidePositions({}); setSlideTextOverrides({}); setSlideTextColors({}); setEditingSlide(null); } draggedSongIdRef.current = null; originalSongOrderRef.current = null; setDraggedSongId(null); }} className={draggedSongId === song.id ? 'is-dragging' : ''} aria-roledescription="끌어서 순서 변경"><span className="selected-drag-handle" aria-hidden="true">⠿</span><span className="selected-index">{String(index + 1).padStart(2, '0')}</span><span className="selected-song"><strong>{song.title}</strong></span><div className="selected-actions"><button type="button" onClick={() => moveSong(index, -1)} disabled={index === 0} aria-label={`${song.title} 위로`}>↑</button><button type="button" onClick={() => moveSong(index, 1)} disabled={index === selected.length - 1} aria-label={`${song.title} 아래로`}>↓</button><button type="button" onClick={() => { setRemovedSlideIndexes([]); setSelected((items) => items.filter((item) => item.id !== song.id)); }} aria-label={`${song.title} 제거`}>×</button></div></li>)}</ol></section>}
               </div> : editorTab === 'favorites' ? <div className="editor-control-group">
                 <div className="editor-heading"><h2>즐겨찾기</h2><span>{favoriteSongs.length}곡</span></div>
@@ -1263,6 +1126,26 @@ export function WorshipApp() {
           <section className="editor-workspace" aria-labelledby="preview-title">
             <div className="editor-toolbar"><div className="editor-toolbar__left"><div className="editor-title-control" ref={titleControlRef}><svg className="editor-title-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round"/><path d="M13 14h5m-2-2 2 2-2 2" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>{titleEditOpen ? <input className="editor-document-title-input" aria-label="프레젠테이션 제목 편집" style={{width:`${Math.max(1, presentationTitle.length)}em`}} autoFocus value={presentationTitle} onChange={(event) => setPresentationTitle(event.target.value)} maxLength={80} onBlur={() => setTitleEditOpen(false)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === 'Escape') { event.preventDefault(); setTitleEditOpen(false); } }} /> : <button className="editor-document-title" type="button" aria-label="프레젠테이션 제목 수정" aria-expanded={titleEditOpen} onClick={() => setTitleEditOpen(true)}><span>{presentationTitle.trim() || '제목 없는 디자인'}</span></button>}</div><div className="editor-size-control" ref={sizeControlRef}><button className="editor-page-count" type="button" aria-label={`슬라이드 크기 ${slideSize.width} 곱하기 ${slideSize.height} 픽셀`} aria-expanded={sizeOpen} onClick={() => setSizeOpen((open) => !open)}><span>{slideSize.width}×{slideSize.height} px</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4.5 7.5 5.5 5 5.5-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button>{sizeOpen && <div className="editor-size-menu"><div className="editor-size-presets">{[{label:'16:9',width:1280,height:720},{label:'16:10',width:1280,height:800},{label:'4:3',width:1280,height:960},{label:'1:1',width:960,height:960}].map((preset) => <button type="button" key={preset.label} aria-pressed={slideSize.width===preset.width&&slideSize.height===preset.height} onClick={() => setSlideSize({width:preset.width,height:preset.height})}>{preset.label}</button>)}</div><div className="editor-size-custom"><label>가로<input type="number" min="320" max="3840" value={slideSize.width} onChange={(event) => setSlideSize((size) => ({...size,width:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label><span>×</span><label>세로<input type="number" min="320" max="3840" value={slideSize.height} onChange={(event) => setSlideSize((size) => ({...size,height:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label></div></div>}</div></div>
             <div className="editor-toolbar-account"><span>{authUser?.email}</span><button type="button" onClick={() => void signOut()}>로그아웃</button></div></div>
+            {activeSong && <section className="editor-ppt-candidate" aria-label="악보 PPT 미리보기">
+              <div className="editor-ppt-candidate__header">
+                <strong>{activeSong.title}</strong>
+                <button type="button" className="preview-retry" onClick={() => setActiveSong(null)}>닫기</button>
+              </div>
+              {candidateImages.length > 0 ? <>
+                <img src={candidateImages[candidatePage]} alt={`${activeSong.title} ${candidatePage + 1} 페이지`} />
+                <div className="editor-ppt-candidate__actions">
+                  <button type="button" className="preview-retry" disabled={candidatePage === 0} onClick={() => setCandidatePage(page => page - 1)}>이전</button>
+                  <span>{candidatePage + 1} / {candidateImages.length}</span>
+                  <button type="button" className="preview-retry" disabled={candidatePage + 1 >= candidateImages.length} onClick={() => setCandidatePage(page => page + 1)}>다음</button>
+                  <button type="button" className="btn btn--primary" disabled={Boolean(candidateAdded) || selected.length >= 100} onClick={() => addOriginalPpt(activeSong)}>
+                    {candidateAdded ? '추가됨' : '추가'}
+                  </button>
+                </div>
+              </> : <div role="status">
+                <span>{candidateStatus?.message ?? '악보 PPT를 찾는 중입니다.'}</span>
+                {candidateStatus?.state === 'failed' && <button type="button" className="preview-retry" onClick={() => retryMelody(activeSong)}>다시 시도</button>}
+              </div>}
+            </section>}
             {statusSong && melodyStatus && <div className="editor-melody-status" role="status">
               <span><strong>{statusSong.title}</strong> · {melodyStatus.message}</span>
               {melodyStatus.state === 'failed' && <button type="button" className="preview-retry" onClick={() => retryMelody(statusSong)}>악보 다시 시도</button>}
@@ -1292,21 +1175,23 @@ export function WorshipApp() {
           {!inspectorCollapsed && <aside className="editor-inspector" aria-label="슬라이드 편집">
             <div className="inspector-heading" onPointerDown={startInspectorDockDrag} onPointerUp={stopInspectorDockDrag} onPointerCancel={stopInspectorDockDrag}><div><p className="editor-kicker">편집 도구</p><h2>슬라이드 디자인</h2></div><span className="editor-count">{preview ? `${preview.slideIndex + 1} / ${preview.slideCount}` : '—'}</span><span className="inspector-dock-grip" aria-hidden="true">⠿</span></div>
             <div className="inspector-controls">
-              <div className="inspector-group"><h3>악보</h3>
-              {editableScore && scoreControlSong && <button type="button" className="btn btn--secondary"
+              <div className="inspector-group"><h3>음원에서 가사 PPT 만들기</h3><label className="file-field"><span className="file-picker-button">음원 선택</span><input type="file" accept="audio/*,.mp3,.wav,.m4a,.flac" onChange={event => { const file=event.target.files?.[0]; if(file) void uploadLyricsAudio(file);event.target.value=''; }}/><small>최대 20MB · 분석한 파일은 저장된 가사를 재사용합니다.</small></label></div><div className="inspector-group"><h3>악보</h3>{scoreControlSong && ['sheet-omr','sheet-image'].includes(scoreFor(scoreControlSong)?.sourceType ?? '') && <p><small>원본 악보의 음표와 가사를 함께 표시합니다.</small>{scoreFor(scoreControlSong)?.sourcePage && <a href={scoreFor(scoreControlSong)?.sourcePage} target="_blank" rel="noreferrer">원본 악보 보기</a>}</p>}{scoreControlSong && scoreFor(scoreControlSong)?.musicxmlUrl && <a className="btn btn--secondary" href={scoreFor(scoreControlSong)?.musicxmlUrl} download="output_sheet.musicxml">MusicXML 다운로드</a>}
+              {editableScore?.notes.length ? (scoreControlSong && <button type="button" className="btn btn--secondary"
                 onClick={() => setEditingScore({ song: scoreControlSong, score: editableScore })}>
                 {editableScore.reviewed ? '수정본 편집' : '자동 채보 초안 편집'}
-              </button>}{scoreControlSong ? <ScoreControls key={`${scoreControlSong.id}:${scoreControlSong.title}`} title={scoreControlSong.title} lyrics={scoreControlSong.lyrics ?? ''} staffColor={slideTextColors[previewIndex] ?? pptStyle.textColor}
+              </button>) : null}{scoreControlSong ? <ScoreControls key={`${scoreControlSong.id}:${scoreControlSong.title}`} title={scoreControlSong.title} lyrics={scoreControlSong.lyrics ?? ''} staffColor={slideTextColors[previewIndex] ?? pptStyle.textColor}
               onAudio={async (file, onWaiting) => {
                 const score = await uploadMelody(scoreControlSong, file, onWaiting);
                 if (!selected.some(song => song.id === scoreControlSong.id)) addSelectionShortcut.current(scoreControlSong);
                 updateScore(scoreControlSong, score);
+                setSelected(items => items.map(song => song.id === scoreControlSong.id ? { ...song, originalPpt: false } : song));
                 setScorePages(pages => pages.filter(page => recentTitleKey(page.title) !== recentTitleKey(scoreControlSong.title)));
               }}
               onGenerated={(title, slides) => {
                 if (!selected.some((song) => song.id === scoreControlSong.id)) addSelectionShortcut.current(scoreControlSong);
                 const scoreTitle = scoreControlSong.title || title;
                 scoreNavigationPending.current = recentTitleKey(scoreTitle);
+                setSelected(items => items.map(song => song.id === scoreControlSong.id ? { ...song, originalPpt: false } : song));
                 setScorePages((current) => [...current.filter((score) => recentTitleKey(score.title) !== recentTitleKey(scoreTitle)), { title: scoreTitle, slides }]);
                 setPptNotice({ text: '악보를 현재 PPT 슬라이드에 넣었습니다.', kind: 'success' });
               }} /> : <div className="score-controls__empty"><p>먼저 악보를 넣을 곡을 선택해 주세요.</p>{recentSongs[0] && <button type="button" className="btn btn--secondary" onClick={() => void openRecentSong(recentSongs[0])}>최근 곡 불러오기 · {recentSongs[0].title}</button>}</div>}</div>

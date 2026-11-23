@@ -673,3 +673,26 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
 .score-edit-notes { margin-bottom: 12px; }
 .score-edit-notes button { touch-action: none; }
 .score-edit-notes button[aria-pressed="true"] { background: #16233b; color: white; }
+
+.editor-ppt-candidate {
+  display: grid;
+  gap: 12px;
+  padding: 14px clamp(12px, 4vw, 42px);
+  background: #f5f6f8;
+  color: #172739;
+}
+.editor-ppt-candidate__header,
+.editor-ppt-candidate__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.editor-ppt-candidate__header { justify-content: space-between; }
+.editor-ppt-candidate__actions { justify-content: center; flex-wrap: wrap; }
+.editor-ppt-candidate img {
+  display: block;
+  width: 100%;
+  max-height: 36vh;
+  object-fit: contain;
+}
+.editor-ppt-candidate [role="status"] .preview-retry { margin-left: 12px; }

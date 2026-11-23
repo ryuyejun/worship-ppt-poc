@@ -6,7 +6,7 @@ export type SlideTextPosition = { x: number; y: number; width: number; height: n
 export type SlideStyle = { backgroundColor: string; textColor: string; fontFamily: string; fontSize: number; alignment: 'LEFT' | 'CENTER' | 'RIGHT'; linesPerSlide: number; bold: boolean; textX?: number; textY?: number; textWidth?: number; textHeight?: number; backgroundImageBase64?: string; backgroundImageType?: string };
 export type SlideSize = { width: number; height: number };
 export type PresentationInput = { slideSize?: SlideSize; songIds: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; autoMelodies?: Record<number, AutoMelody>; scorePages?: { title: string; slides: ScoreSlide[] }[]; extraSlides?: number; removedSlideIndexes?: number[]; slidePositions?: Record<number, SlideTextPosition>; slideTextOverrides?: Record<number, string>; slideTextColors?: Record<number, string>; pptxBase64?: string; style: SlideStyle };
-export type Slide = { autoScore?: boolean; title: string; lines: string[]; scoreRows?: ScoreSlide['rows']; textPosition?: SlideTextPosition; textColor?: string };
+export type Slide = { scorePageImage?: string; autoScore?: boolean; title: string; lines: string[]; scoreRows?: ScoreSlide['rows']; textPosition?: SlideTextPosition; textColor?: string };
 const lyricCache = new Map<number, Song>();
 
 function lyricLineWidth(text: string, fontSize: number): number {
@@ -92,8 +92,9 @@ export function splitLyrics(lyrics: string, perSlide: number, layout?: { width: 
   if (!Number.isInteger(perSlide) || perSlide < 1 || perSlide > 6) throw new Error('한 장의 줄 수는 1~6이어야 합니다.');
   const slides: string[][] = []; let section: string[] = [];
   const flush = () => { for (let i = 0; i < section.length; i += perSlide) slides.push(section.slice(i, i + perSlide)); section = []; };
-  for (const line of lyrics.split(/\r\n|\r|\n/)) {
-    if (!line.trim() || /^\[[^\[\]\r\n]{1,40}\]$/.test(line.trim())) flush();
+  for (const rawLine of lyrics.split(/\r\n|\r|\n/)) {
+    const line = rawLine.replace(/^\s*(?:\[\d{1,3}:[0-5]\d(?:[.:,]\d{1,3})?\]\s*)+/u, '').trim();
+    if (!line || /^\[[^\[\]\r\n]{1,40}\]$/.test(line)) flush();
     else if (layout) section.push(...wrapLyricLine(line, layout.width * layout.maxTextWidth / 100, layout.fontSize));
     else section.push(line);
   }
@@ -106,6 +107,10 @@ export async function collectSlides(input: PresentationInput, signal?: AbortSign
   if (input.pptxBase64) throw new Error('기존 PPTX에 추가하는 기능은 Cloudflare 전환 중입니다. 새 PPTX로 만들어 주세요.');
   const external = new Map((input.externalSongs || []).map(song => [song.id, song]));
   const songs = await Promise.all(input.songIds.map(async id => {
+    const original = input.autoMelodies?.[id];
+    if (original?.sourceType === 'sheet-image' && original.sheetImages?.length) {
+      return { id, title: original.title, artist: null, lyrics: '' };
+    }
     const supplied = external.get(id);
     if (supplied?.lyrics.trim()) return supplied;
     if (id < 0) throw new Error('선택한 곡에 가사가 없습니다.');
@@ -140,6 +145,10 @@ export async function collectSlides(input: PresentationInput, signal?: AbortSign
     const score = scoresByTitle.get(title);
     if (score?.slides.length) {
       return score.slides.map(page => ({ title: song.title, lines: page.rows.map(row => row.lyrics), scoreRows: page.rows }));
+    }
+    const original = input.autoMelodies?.[song.id];
+    if (original?.sourceType === 'sheet-image' && original.sheetImages?.length) {
+      return original.sheetImages.map(scorePageImage => ({title:song.title,lines:[],scorePageImage,autoScore:true}));
     }
     const pages = splitLyrics(song.lyrics, safeLinesPerSlide, layout);
     const candidate = input.autoMelodies?.[song.id];
@@ -188,6 +197,13 @@ export async function makePresentation(slides: Slide[], style: SlideStyle, size 
       const type = style.backgroundImageType === 'PNG' ? 'png' : 'jpeg';
       slide.addImage({ data: `data:image/${type};base64,${style.backgroundImageBase64}`, x: 0, y: 0, w: size.width/96, h: size.height/96 });
     }
+    if (item.scorePageImage) {
+      const imageWidth = Math.min(size.width, size.height * 16 / 9);
+      const imageHeight = imageWidth * 9 / 16;
+      slide.addImage({ data: item.scorePageImage, x: (size.width - imageWidth) / 192,
+        y: (size.height - imageHeight) / 192, w: imageWidth / 96, h: imageHeight / 96 });
+      continue;
+    }
     if (item.scoreRows?.length) {
       const rowCount = item.scoreRows.length;
       const rowHeight = Math.min(2.05, (size.height / 96) * 0.84 / rowCount);
@@ -225,6 +241,13 @@ export async function renderSlide(_slide: Slide, style: SlideStyle, width = 1280
   if (style.backgroundImageBase64 && style.backgroundImageType) {
     const image = new Image(); image.src = `data:image/${style.backgroundImageType === 'PNG' ? 'png' : 'jpeg'};base64,${style.backgroundImageBase64}`;
     await image.decode(); ctx.drawImage(image, 0, 0, size.width, size.height);
+  }
+  if (_slide.scorePageImage) {
+    const image = new Image(); image.src = _slide.scorePageImage;
+    await image.decode();
+    const scale = Math.min(size.width / image.naturalWidth, size.height / image.naturalHeight);
+    const w = image.naturalWidth * scale, h = image.naturalHeight * scale;
+    ctx.drawImage(image, (size.width-w)/2, (size.height-h)/2, w, h);
   }
   return canvas.toDataURL('image/png').split(',')[1];
 }

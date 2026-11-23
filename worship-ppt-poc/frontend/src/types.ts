@@ -9,7 +9,12 @@ export interface Song {
   category: string | null;
   hymnNumber: number | null;
   source?: string | null;
+  youtubeVideoId?: string | null;
+  youtubePlaylistId?: string | null;
   lyrics?: string;
+  lyricsFilteredByVocalBounds?: boolean;
+  lyricsFromAudio?: boolean;
+  youtubeRecordingVerified?: boolean;
 }
 
 export interface SongRequest {
