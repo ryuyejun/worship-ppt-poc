@@ -176,6 +176,7 @@ export function WorshipApp() {
   const [authFieldErrors, setAuthFieldErrors] = useState<{ email?: string; password?: string }>({});
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [page, setPage] = useState<'create' | 'manage'>(window.location.hash === '#manage' ? 'manage' : 'create');
+  const [mobileEditorView, setMobileEditorView] = useState<'songs' | 'slides'>('songs');
   const [navOpen, setNavOpen] = useState(false);
   const [readySongs, setReadySongs] = useState<Song[]>([]);
   const [allSongs, setAllSongs] = useState<Song[]>([]);
@@ -372,6 +373,7 @@ export function WorshipApp() {
       || youtubeVideos.find(video => video.songId === song.id)?.videoId;
     const chosen = existing ?? { ...song, youtubeVideoId: videoId };
     setActiveSong(chosen);
+    setMobileEditorView('slides');
     setSearchOpen(false);
     setPptNotice(null);
   }
@@ -384,6 +386,7 @@ export function WorshipApp() {
     setActiveSong(null);
     if (existing) {
       changeEditorTab('songs');
+      setMobileEditorView('slides');
       setPptNotice({ text: `${song.title}은(는) 이미 제작 목록에 있습니다.`, kind: 'success' });
       return;
     }
@@ -403,6 +406,7 @@ export function WorshipApp() {
     setRemovedSlideIndexes([]); setSlideOrder([]);
     setSelected(items => [...items, { ...song, originalPpt: true }]);
     setActiveSong(null);
+    setMobileEditorView('slides');
     setPptNotice(null);
     changeEditorTab('songs');
     if (song.id > 0) setSongSelectionCounts(counts => ({ ...counts, [song.id]: (counts[song.id] ?? 0) + 1 }));
@@ -1028,7 +1032,11 @@ export function WorshipApp() {
       </header>}
 
       {page === 'create' ? (
-        <main className="editor-page" id="create" onPointerDownCapture={(event) => { const target = event.target; if (target instanceof Element && target.closest('.editor-slide-text, .text-box-handle')) return; setSelectedTextSlide(null); }}>
+        <main className={`editor-page mobile-view-${mobileEditorView}`} id="create" onPointerDownCapture={(event) => { const target = event.target; if (target instanceof Element && target.closest('.editor-slide-text, .text-box-handle')) return; setSelectedTextSlide(null); }}>
+          <nav className="editor-mobile-nav" aria-label="편집 화면">
+            <button type="button" aria-pressed={mobileEditorView === 'songs'} onClick={() => setMobileEditorView('songs')}>곡 선택</button>
+            <button type="button" aria-pressed={mobileEditorView === 'slides'} onClick={() => setMobileEditorView('slides')} disabled={!activeSong && selected.length === 0}>PPT 미리보기</button>
+          </nav>
           <aside className="editor-sidebar" aria-label="찬양 곡 선택">
             <a className="editor-brand" href="#create" aria-label="Yebit 찬양 PPT 제작">
               <img src="/assets/figma/editor-logo.png" width="42" height="42" alt="" />
@@ -1108,11 +1116,15 @@ export function WorshipApp() {
             <div className="editor-toolbar"><div className="editor-toolbar__left"><div className="editor-title-control" ref={titleControlRef}><svg className="editor-title-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round"/><path d="M13 14h5m-2-2 2 2-2 2" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>{titleEditOpen ? <input className="editor-document-title-input" aria-label="프레젠테이션 제목 편집" style={{width:`${Math.max(1, presentationTitle.length)}em`}} autoFocus value={presentationTitle} onChange={(event) => setPresentationTitle(event.target.value)} maxLength={80} onBlur={() => setTitleEditOpen(false)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === 'Escape') { event.preventDefault(); setTitleEditOpen(false); } }} /> : <button className="editor-document-title" type="button" aria-label="프레젠테이션 제목 수정" aria-expanded={titleEditOpen} onClick={() => setTitleEditOpen(true)}><span>{presentationTitle.trim() || '제목 없는 디자인'}</span></button>}</div><div className="editor-size-control" ref={sizeControlRef}><button className="editor-page-count" type="button" aria-label={`슬라이드 크기 ${slideSize.width} 곱하기 ${slideSize.height} 픽셀`} aria-expanded={sizeOpen} onClick={() => setSizeOpen((open) => !open)}><span>{slideSize.width}×{slideSize.height} px</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4.5 7.5 5.5 5 5.5-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button>{sizeOpen && <div className="editor-size-menu"><div className="editor-size-presets">{[{label:'16:9',width:1280,height:720},{label:'16:10',width:1280,height:800},{label:'4:3',width:1280,height:960},{label:'1:1',width:960,height:960}].map((preset) => <button type="button" key={preset.label} aria-pressed={slideSize.width===preset.width&&slideSize.height===preset.height} onClick={() => setSlideSize({width:preset.width,height:preset.height})}>{preset.label}</button>)}</div><div className="editor-size-custom"><label>가로<input type="number" min="320" max="3840" value={slideSize.width} onChange={(event) => setSlideSize((size) => ({...size,width:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label><span>×</span><label>세로<input type="number" min="320" max="3840" value={slideSize.height} onChange={(event) => setSlideSize((size) => ({...size,height:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label></div></div>}</div></div>
             <div className="editor-toolbar-account"><button className="editor-toolbar-queue" type="button" onClick={() => { setEditorTab('songs'); window.requestAnimationFrame(() => selectedQueueRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })); }} aria-label={`제작 목록, ${selected.length}곡 · ${preview?.slideCount ?? 1}장`}>{selected.length}곡 · {preview?.slideCount ?? 1}장</button><button className="btn btn--primary editor-toolbar-export" type="button" onClick={createPpt} disabled={creating}>{creating ? '만드는 중…' : 'PPTX 다운로드'}</button><button className={darkMode ? 'editor-theme-toggle is-dark' : 'editor-theme-toggle'} type="button" aria-label={darkMode ? '라이트 모드로 전환' : '다크 모드로 전환'} aria-pressed={darkMode} title={darkMode ? '라이트 모드' : '다크 모드'} onClick={() => setDarkMode(mode => !mode)}>{darkMode ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 15.1A8.5 8.5 0 0 1 8.9 3.8 8.6 8.6 0 1 0 20.2 15.1Z" fill="currentColor"/></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.4" fill="currentColor"/><path d="M12 2v2.2M12 19.8V22M4.93 4.93l1.56 1.56m11.02 11.02 1.56 1.56M2 12h2.2m15.6 0H22M4.93 19.07l1.56-1.56M17.51 6.49l1.56-1.56" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/></svg>}</button><div className="editor-account-control" ref={accountMenuRef}><button className="editor-account-trigger" type="button" aria-haspopup="menu" aria-expanded={accountMenuOpen} onClick={() => setAccountMenuOpen(open => !open)}><span>{authUser?.email ?? '계정'}</span><span className="editor-account-chevron" aria-hidden="true">⌄</span></button>{accountMenuOpen && <div className="editor-account-menu" role="menu"><button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); setSettingsOpen(true); }}><span aria-hidden="true">⚙</span> 설정</button><button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); void signOut(); }}><span aria-hidden="true">↪</span> 로그아웃</button></div>}</div></div></div>
             {pptNotice && <p className={`editor-ppt-notice notice ${pptNotice.kind ?? ''}`} role="status" aria-live="polite">{pptNotice.text}</p>}
+            {!activeSong && scoreControlSong && <div className="editor-mobile-song-context" aria-label={`현재 선택한 곡 ${scoreControlSong.title}`}>
+              <span>선택한 곡</span>
+              <strong>{scoreControlSong.title}</strong>
+            </div>}
             {activeSong && <section className="editor-ppt-candidate" aria-label="선택한 곡">
               <div className="editor-ppt-candidate__header">
                 <strong>{activeSong.title}</strong>
                 <div className="editor-ppt-candidate__actions">
-                  <button type="button" className="preview-retry" onClick={() => setActiveSong(null)}>닫기</button>
+                  <button type="button" className="preview-retry" onClick={() => { setActiveSong(null); setMobileEditorView('songs'); }}>곡 선택으로</button>
                   <button type="button" className="btn btn--primary" disabled={Boolean(candidateAdded) || selected.length >= 100} onClick={() => addOriginalPpt(activeSong)}>
                     {candidateAdded ? '목록에 추가됨' : '곡 목록에 추가'}
                   </button>

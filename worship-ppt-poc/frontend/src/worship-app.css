@@ -235,6 +235,8 @@ footer.app-footer.closing { height: auto; min-height: 0; padding: 18px 40px 20px
 /* PPT 편집 화면: Figma 557:410의 1512×982 프레임 비율과 레이어 재현 */
 .app-nav .nav__bar { max-width: none; padding-inline: 24px; }
 .editor-page { --editor-sidebar-width: 231px; display: grid; grid-template-columns: var(--editor-sidebar-width) minmax(0, 1fr); position: relative; width: 100%; height: 100dvh; min-height: 560px; overflow: hidden; background: #e7e7e7; }
+.editor-mobile-nav { display:none; }
+.editor-mobile-song-context { display:none; }
 .editor-page > .editor-workspace { grid-column: 2; grid-row: 1; }
 .editor-sidebar { position: relative; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; background: rgba(255,255,255,.7); -webkit-backdrop-filter: blur(10px) saturate(140%); backdrop-filter: blur(10px) saturate(140%); }
 .editor-sidebar { z-index: 2; }
@@ -452,9 +454,16 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
   .editor-document-title-input { width: 145px; max-width: 145px; }
 }
 @media (max-width: 620px) {
-  .editor-page { display: flex; height: auto; min-height: 100dvh; flex-direction: column; overflow: visible; }
-  .editor-sidebar { order: 1; width: 100%; min-height: 540px; flex: 0 0 540px; border-top: 0; border-right: 0; border-bottom: 1px solid rgba(0,0,0,.12); }
-  main.editor-page > section.editor-workspace { order: 2; width: 100%; min-height: 550px; }
+  .editor-page { display:flex; height:auto; min-height:100dvh; flex-direction:column; overflow:visible; padding-bottom:env(safe-area-inset-bottom); }
+  .editor-mobile-nav { position:sticky; top:0; z-index:15; order:0; display:grid; grid-template-columns:1fr 1fr; gap:5px; width:100%; height:58px; flex:0 0 58px; border-bottom:1px solid var(--app-line); background:var(--app-card); padding:7px 12px; box-shadow:0 2px 10px rgba(17,30,43,.06); }
+  .editor-mobile-nav button { min-width:0; min-height:42px; border:0; border-radius:9px; background:transparent; padding:0 10px; color:var(--app-muted); font:inherit; font-size:14px; cursor:pointer; }
+  .editor-mobile-nav button[aria-pressed="true"] { background:color-mix(in oklab, var(--app-ink) 7%, var(--app-card)); color:var(--app-ink); font-weight:650; box-shadow:0 1px 3px rgba(15,31,46,.1); }
+  .editor-mobile-nav button:disabled { opacity:.48; cursor:default; }
+  .editor-mobile-nav button:focus-visible { outline:2px solid #63b4e1; outline-offset:1px; }
+  .editor-page.mobile-view-songs > .editor-workspace { display:none; }
+  .editor-page.mobile-view-slides > .editor-sidebar { display:none; }
+  .editor-sidebar { order:1; width:100%; min-height:calc(100dvh - 58px); flex:1 0 auto; border-top:0; border-right:0; border-bottom:1px solid rgba(0,0,0,.12); }
+  main.editor-page > section.editor-workspace { order:1; width:100%; min-height:max(550px, calc(100dvh - 58px)); }
   .editor-toolbar { flex-basis: 58px; height: 58px; }
   .editor-toolbar__left { right: 120px; left: 8px; min-width: 0; gap: 6px; }
   .editor-title-icon { display: none; }
@@ -467,10 +476,20 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
   .editor-toolbar-account .editor-toolbar-export::after { content: 'PPTX'; font-size: 10px; }
   .editor-toolbar-account .editor-account-trigger { width: 30px; max-width: 30px; justify-content: center; padding-inline: 0; }
   .editor-toolbar-account .editor-account-trigger > span:first-child { display: none; }
-  .editor-stage { min-height: 385px; padding: 16px 0 24px; }
-  .editor-page-stack { gap: 24px; }
-  .editor-page-sheet,.editor-canvas,.editor-canvas.has-preview { left: 0; width: calc(100% - 24px); }
-  .editor-filmstrip { flex-basis: 95px; max-width: 100%; padding: 1px 12px 0; }
+  .editor-mobile-song-context { display:grid; gap:4px; margin:14px 12px 0; border:1px solid var(--app-line); border-radius:12px; background:var(--app-card); padding:11px 14px; color:var(--app-ink); }
+  .editor-mobile-song-context > span { color:var(--app-muted); font-size:11px; }
+  .editor-mobile-song-context > strong { overflow-wrap:anywhere; font-size:15px; font-weight:600; line-height:1.4; }
+  .editor-ppt-candidate { margin:14px 12px 0; border:1px solid var(--app-line); border-radius:12px; padding:14px; box-shadow:0 4px 14px rgba(17,30,43,.06); }
+  .editor-ppt-candidate__header { align-items:stretch; flex-direction:column; gap:12px; }
+  .editor-ppt-candidate__header > strong { overflow-wrap:anywhere; font-size:16px; line-height:1.45; }
+  .editor-ppt-candidate__actions { width:100%; flex-wrap:nowrap; }
+  .editor-ppt-candidate__actions > button { min-height:42px; }
+  .editor-ppt-candidate__actions > .btn { flex:1; }
+  .editor-melody-status,.editor-ppt-notice { margin:12px 12px 0; border-radius:10px; padding:10px 12px; }
+  .editor-stage { min-height:385px; margin:14px 12px 0; border-radius:12px; padding:12px; }
+  .editor-page-stack { gap:20px; }
+  .editor-page-sheet,.editor-canvas,.editor-canvas.has-preview { left:0; width:100%; }
+  .editor-filmstrip { flex-basis:95px; max-width:100%; margin-top:12px; padding:1px 12px 0; }
   .filmstrip-page, .filmstrip-canvas { width: 126px; }
   .filmstrip-page { flex-basis: 126px; height: 95px; }
   .filmstrip-canvas { height: 71px; }
