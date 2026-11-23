@@ -1,7 +1,5 @@
-import { ScoreEditor } from './score-editor';
-import { uploadMelody, useAutoMelodies, type AutoMelody } from './auto-melody';
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
-import { ScoreControls } from './score-controls';
+import { useAutoMelodies, type AutoMelody } from './auto-melody';
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { ScoreSlide } from './score';
 import { api, cloudflareMode } from './api';
 import type { ApiResponse, Song, SongRequest } from './types';
@@ -17,7 +15,7 @@ type PptStyle = {
   textX: number; textY: number; textWidth: number; textHeight: number;
 };
 type Preview = { imageBase64: string; slideIndex: number; slideCount: number };
-type PptPayload = { slideSize?: SlideSize; songIds: number[]; autoMelodies?: Record<number, AutoMelody>; scorePages?: { title: string; slides: ScoreSlide[] }[]; extraSlides?: number; removedSlideIndexes?: number[]; slideOrder?: number[]; slidePositions?: Record<number, SlideTextPosition>; slideTextOverrides?: Record<number, string>; slideTextColors?: Record<number, string>; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; pptxBase64?: string; style: PptStyle & { backgroundImageBase64?: string; backgroundImageType?: string } };
+type PptPayload = { slideSize?: SlideSize; songIds: number[]; autoMelodies?: Record<number, AutoMelody>; extraSlides?: number; removedSlideIndexes?: number[]; slideOrder?: number[]; slidePositions?: Record<number, SlideTextPosition>; slideTextOverrides?: Record<number, string>; slideTextColors?: Record<number, string>; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; style: PptStyle };
 
 function moveIndexedValues<T>(values: Record<number, T>, from: number, to: number, count: number): Record<number, T> {
   const ordered = Array.from({ length: count }, (_, index) => values[index]);
@@ -28,6 +26,39 @@ function moveIndexedValues<T>(values: Record<number, T>, from: number, to: numbe
 
 function recentTitleKey(title: string) {
   return title.normalize('NFC').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+}
+
+function liveSongSuggestions(query: string, songs: Song[]) {
+  const key = recentTitleKey(query);
+  if (!key) return [] as { label: string; songs: Song[] }[];
+
+  const uniqueSongs = [...new Map(songs.map((song) => [song.id, song])).values()];
+  if (/^\d{1,3}$/.test(query.trim())) {
+    const numbered = uniqueSongs.filter((song) => song.hymnNumber === Number(query.trim()));
+    return numbered.length ? [{ label: '찬송가 번호', songs: numbered.slice(0, 4) }] : [];
+  }
+
+  const titleMatches = uniqueSongs
+    .filter((song) => recentTitleKey(song.title).includes(key))
+    .sort((a, b) => {
+      const rank = (song: Song) => {
+        const title = recentTitleKey(song.title);
+        return title === key ? 0 : title.startsWith(key) ? 1 : 2;
+      };
+      return rank(a) - rank(b) || a.title.localeCompare(b.title, 'ko');
+    });
+  const usedIds = new Set(titleMatches.map((song) => song.id));
+  const artistMatches = uniqueSongs.filter((song) => !usedIds.has(song.id)
+    && Boolean(song.artist && recentTitleKey(song.artist).includes(key)));
+  artistMatches.forEach((song) => usedIds.add(song.id));
+  const creditMatches = uniqueSongs.filter((song) => !usedIds.has(song.id)
+    && [song.author, song.composer].some((value) => value && recentTitleKey(value).includes(key)));
+
+  return [
+    titleMatches.length ? { label: '곡 제목', songs: titleMatches.slice(0, 5) } : null,
+    artistMatches.length ? { label: '가수·찬양팀', songs: artistMatches.slice(0, 3) } : null,
+    creditMatches.length ? { label: '작사·작곡', songs: creditMatches.slice(0, 3) } : null,
+  ].filter((group): group is { label: string; songs: Song[] } => group !== null);
 }
 
 function lyricsPreviewText(lyrics: string) {
@@ -72,14 +103,7 @@ function youtubeVideoIdFromUrl(url?: string | null) {
   }
 }
 
-const fontOptions = ['Apple SD Gothic Neo', '맑은 고딕 (Malgun Gothic)', 'Pretendard', 'Noto Sans KR', '나눔고딕 (NanumGothic)', 'Noto Serif KR'];
-
-const templateStyles: Record<string, PptStyle> = {
-  original: { backgroundColor: '#16233a', textColor: '#ffffff', fontFamily: 'Apple SD Gothic Neo', fontSize: 40, alignment: 'CENTER', linesPerSlide: 2, bold: false, textX: 50, textY: 50, textWidth: 87.5, textHeight: 55.6 },
-  sky: { backgroundColor: '#dff1ff', textColor: '#173149', fontFamily: 'Apple SD Gothic Neo', fontSize: 40, alignment: 'CENTER', linesPerSlide: 2, bold: false, textX: 50, textY: 50, textWidth: 87.5, textHeight: 55.6 },
-  white: { backgroundColor: '#ffffff', textColor: '#171717', fontFamily: 'Apple SD Gothic Neo', fontSize: 40, alignment: 'CENTER', linesPerSlide: 2, bold: false, textX: 50, textY: 50, textWidth: 87.5, textHeight: 55.6 },
-  black: { backgroundColor: '#000000', textColor: '#ffffff', fontFamily: 'Apple SD Gothic Neo', fontSize: 40, alignment: 'CENTER', linesPerSlide: 2, bold: false, textX: 50, textY: 50, textWidth: 87.5, textHeight: 55.6 },
-};
+const defaultPptStyle: PptStyle = { backgroundColor: '#ffffff', textColor: '#202124', fontFamily: 'Apple SD Gothic Neo', fontSize: 40, alignment: 'CENTER', linesPerSlide: 2, bold: false, textX: 50, textY: 50, textWidth: 87.5, textHeight: 55.6 };
 
 function displayPerson(value?: string | null) {
   return value?.trim() || '정보 없음';
@@ -142,8 +166,6 @@ function downloadPpt(blob: Blob, name: string) {
 }
 
 export function WorshipApp() {
-  const [editingScore, setEditingScore] = useState<{ song: Song; score: AutoMelody } | null>(null);
-  const [scorePages, setScorePages] = useState<{ title: string; slides: ScoreSlide[] }[]>([]);
   const [authStatus, setAuthStatus] = useState<'checking' | 'authenticated' | 'anonymous'>('checking');
   const [authUser, setAuthUser] = useState<{ id: number; email: string } | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
@@ -155,15 +177,6 @@ export function WorshipApp() {
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [page, setPage] = useState<'create' | 'manage'>(window.location.hash === '#manage' ? 'manage' : 'create');
   const [navOpen, setNavOpen] = useState(false);
-  const [inspectorDock, setInspectorDock] = useState<'left' | 'right'>(() => localStorage.getItem('yebit-inspector-dock') === 'left' ? 'left' : 'right');
-  const [inspectorCollapsed, setInspectorCollapsed] = useState(() => localStorage.getItem('yebit-inspector-collapsed') === 'true');
-  const [inspectorWidth, setInspectorWidth] = useState(() => {
-    const savedWidth = Number(localStorage.getItem('yebit-inspector-width'));
-    return Number.isFinite(savedWidth) && savedWidth >= 240 && savedWidth <= 520 ? savedWidth : 300;
-  });
-  const inspectorResizeRef = useRef<{ pointerId: number; startX: number; startWidth: number; currentWidth: number; dock: 'left' | 'right'; axis: 'x' | 'y' } | null>(null);
-  const lastInspectorWidthRef = useRef(inspectorWidth);
-  const inspectorDockDragRef = useRef<{ pointerId: number; startX: number; startY: number } | null>(null);
   const [readySongs, setReadySongs] = useState<Song[]>([]);
   const [allSongs, setAllSongs] = useState<Song[]>([]);
   const [query, setQuery] = useState('');
@@ -195,61 +208,6 @@ export function WorshipApp() {
     return () => { cancelled = true; };
   }, []);
 
-  useEffect(() => { if (inspectorWidth >= 240) { lastInspectorWidthRef.current = inspectorWidth; localStorage.setItem('yebit-inspector-width', String(inspectorWidth)); } }, [inspectorWidth]);
-  useEffect(() => { localStorage.setItem('yebit-inspector-dock', inspectorDock); }, [inspectorDock]);
-  useEffect(() => { localStorage.setItem('yebit-inspector-collapsed', String(inspectorCollapsed)); }, [inspectorCollapsed]);
-
-  function startInspectorResize(event: ReactPointerEvent<HTMLDivElement>) {
-    if (event.button !== 0 && event.pointerType === 'mouse') return;
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const axis = window.innerWidth <= 860 ? 'y' : 'x';
-    inspectorResizeRef.current = { pointerId: event.pointerId, startX: axis === 'x' ? event.clientX : event.clientY, startWidth: inspectorCollapsed ? 0 : inspectorWidth, currentWidth: inspectorCollapsed ? 0 : inspectorWidth, dock: inspectorDock, axis };
-  }
-
-  function resizeInspector(event: ReactPointerEvent<HTMLDivElement>) {
-    const drag = inspectorResizeRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    const coordinate = drag.axis === 'x' ? event.clientX : event.clientY;
-    const direction = drag.axis === 'y' ? -1 : drag.dock === 'left' ? 1 : -1;
-    const nextWidth = Math.max(0, Math.min(520, drag.startWidth + (coordinate - drag.startX) * direction));
-    drag.currentWidth = nextWidth;
-    setInspectorWidth(nextWidth);
-    if (nextWidth > 0) setInspectorCollapsed(false);
-  }
-
-  function stopInspectorResize(event: ReactPointerEvent<HTMLDivElement>) {
-    if (inspectorResizeRef.current?.pointerId !== event.pointerId) return;
-    const drag = inspectorResizeRef.current;
-    inspectorResizeRef.current = null;
-    if (drag.axis === 'x' && Math.abs(event.clientX - drag.startX) > 120) {
-      setInspectorDock(event.clientX < window.innerWidth / 2 ? 'left' : 'right');
-    }
-    if (drag.currentWidth < 180) {
-      setInspectorWidth(lastInspectorWidthRef.current);
-      setInspectorCollapsed(true);
-    } else {
-      setInspectorWidth(Math.max(240, drag.currentWidth));
-      setInspectorCollapsed(false);
-    }
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-  }
-
-  function startInspectorDockDrag(event: ReactPointerEvent<HTMLDivElement>) {
-    if (event.button !== 0 && event.pointerType === 'mouse') return;
-    inspectorDockDragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-
-  function stopInspectorDockDrag(event: ReactPointerEvent<HTMLDivElement>) {
-    const drag = inspectorDockDragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    inspectorDockDragRef.current = null;
-    if (window.innerWidth <= 860 && event.clientY - drag.startY > 100) setInspectorCollapsed(true);
-    else if (Math.abs(event.clientX - drag.startX) > 80 && Math.abs(event.clientX - drag.startX) > Math.abs(event.clientY - drag.startY)) setInspectorDock(event.clientX < window.innerWidth / 2 ? 'left' : 'right');
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-  }
-
   const artworkAttempts = useRef(new Set<string>());
   const artworkQueue = useRef<(Pick<Song, 'id' | 'title'> & { artist?: string | null })[]>([]);
   const activeArtworkRequests = useRef(0);
@@ -259,7 +217,6 @@ export function WorshipApp() {
   const [results, setResults] = useState<Song[]>([]);
   const [selected, setSelected] = useState<SelectedSong[]>([]);
   const [activeSong, setActiveSong] = useState<Song | null>(null);
-  const [candidatePage, setCandidatePage] = useState(0);
   const [searchNotice, setSearchNotice] = useState<Notice>(null);
   const [pptNotice, setPptNotice] = useState<Notice>(null);
   const [creating, setCreating] = useState(false);
@@ -269,14 +226,7 @@ export function WorshipApp() {
   const [requestNotice, setRequestNotice] = useState<Notice>(null);
   const [importNotice, setImportNotice] = useState<Notice>(null);
   const [importing, setImporting] = useState(false);
-  const [existingPpt, setExistingPpt] = useState<File | null>(null);
-  const [existingPptData, setExistingPptData] = useState<string | null>(null);
-  const [existingPptError, setExistingPptError] = useState('');
-  const [pptStyle, setPptStyle] = useState<PptStyle>(templateStyles.original);
-  const [template, setTemplate] = useState('original');
-  const [backgroundImage, setBackgroundImage] = useState<{ dataUrl: string; type: 'PNG' | 'JPEG'; name: string } | null>(null);
-  const [backgroundDropActive, setBackgroundDropActive] = useState(false);
-  const [imageInputKey, setImageInputKey] = useState(0);
+  const pptStyle = defaultPptStyle;
   const [libraryError, setLibraryError] = useState('');
   const [editorTab, setEditorTab] = useState<'songs' | 'favorites' | 'trending'>('songs');
   const [youtubeVideos, setYoutubeVideos] = useState<{ videoId: string; songId: number; title: string; artworkUrl: string | null }[]>([]);
@@ -326,8 +276,6 @@ export function WorshipApp() {
   });
   const [slideSize, setSlideSize] = useState<SlideSize>({ width:1280, height:720 });
   const [sizeOpen, setSizeOpen] = useState(false);
-  const [fontQuery, setFontQuery] = useState('');
-  const [fontListOpen, setFontListOpen] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewIndex, setPreviewIndex] = useState(0);
   const [extraSlideCount, setExtraSlideCount] = useState(0);
@@ -350,17 +298,17 @@ export function WorshipApp() {
   const [previewRetry, setPreviewRetry] = useState(0);
   const displaySlideOrder = normalizeSlideOrder(slideOrder, prepared?.slides.length ?? preview?.slideCount ?? 0);
 
-  const validStyle = Boolean(pptStyle.fontFamily.trim()) && pptStyle.fontFamily.length <= 80 && Number.isInteger(pptStyle.fontSize) && pptStyle.fontSize >= 16 && pptStyle.fontSize <= 100 && Number.isInteger(pptStyle.linesPerSlide) && pptStyle.linesPerSlide >= 1 && pptStyle.linesPerSlide <= 6;
   const favoriteSongs = allSongs.filter((song) => favoriteIds.includes(song.id));
-  const { melodies: autoMelodies, statusFor: melodyStatusFor, scoreFor, updateScore, retry: retryMelody } = useAutoMelodies(selected, activeSong);
+  const searchSuggestions = searchOpen ? liveSongSuggestions(query, [...readySongs, ...allSongs]) : [];
+  const { melodies: autoMelodies, statusFor: melodyStatusFor, retry: retryMelody } = useAutoMelodies(selected);
   const previewSong = prepared?.slides[previewIndex]?.title;
   const scoreControlSong = (previewSong ? selected.find((song) => recentTitleKey(song.title) === recentTitleKey(previewSong)) : undefined) ?? selected[0] ?? activeSong;
-  const statusSong = scoreControlSong;
-  const candidateScore = activeSong ? scoreFor(activeSong) : undefined;
-  const candidateImages = candidateScore?.sheetImages ?? [];
-  const candidateStatus = activeSong ? melodyStatusFor(activeSong) : undefined;
-  const candidateAdded = activeSong && selected.some(song => song.id === activeSong.id || recentTitleKey(song.title) === recentTitleKey(activeSong.title));
-  const editableScore = scoreControlSong ? scoreFor(scoreControlSong) : undefined;
+  const statusSong = selected.find(song =>
+    recentTitleKey(song.title) === scoreNavigationPending.current && melodyStatusFor(song)
+  ) ?? scoreControlSong;
+  const candidateAdded = activeSong && selected.some(song =>
+    song.id === activeSong.id || recentTitleKey(song.title) === recentTitleKey(activeSong.title)
+  );
   const melodyStatus = statusSong ? melodyStatusFor(statusSong) : undefined;
   useEffect(() => {
     if (authStatus !== 'authenticated') return;
@@ -423,21 +371,35 @@ export function WorshipApp() {
     const videoId = trendingVideoId || song.youtubeVideoId || youtubeVideoIdFromUrl(song.source)
       || youtubeVideos.find(video => video.songId === song.id)?.videoId;
     const chosen = existing ?? { ...song, youtubeVideoId: videoId };
-    retryMelody(chosen);
     setActiveSong(chosen);
-    setCandidatePage(0);
     setSearchOpen(false);
     setPptNotice(null);
   }
 
+  function addSearchResult(song: Song) {
+    const existing = selected.find(item => item.id === song.id || recentTitleKey(item.title) === recentTitleKey(song.title));
+    const videoId = song.youtubeVideoId || youtubeVideoIdFromUrl(song.source)
+      || youtubeVideos.find(video => video.songId === song.id)?.videoId;
+    setSearchOpen(false);
+    setActiveSong(null);
+    if (existing) {
+      changeEditorTab('songs');
+      setPptNotice({ text: `${song.title}은(는) 이미 제작 목록에 있습니다.`, kind: 'success' });
+      return;
+    }
+    addOriginalPpt({ ...song, youtubeVideoId: videoId });
+    setPptNotice({ text: `${song.title} PPT 미리보기를 준비하고 있습니다.`, kind: 'success' });
+  }
+
   function addOriginalPpt(song: Song) {
-    if (!scoreFor(song)?.sheetImages?.length || selected.some(item => item.id === song.id || recentTitleKey(item.title) === recentTitleKey(song.title))) return;
+    if (selected.some(item => item.id === song.id || recentTitleKey(item.title) === recentTitleKey(song.title))) return;
     if (selected.length >= 100) {
       setPptNotice({ text: '한 번에 최대 100곡까지 선택할 수 있습니다.', kind: 'error' });
       return;
     }
     const videoId = song.youtubeVideoId ?? undefined;
     scoreNavigationPending.current = recentTitleKey(song.title);
+    retryMelody(song);
     setRemovedSlideIndexes([]); setSlideOrder([]);
     setSelected(items => [...items, { ...song, originalPpt: true }]);
     setActiveSong(null);
@@ -538,7 +500,6 @@ export function WorshipApp() {
       slideSize,
       songIds: selected.filter(song => !song.originalPpt || autoMelodies[song.id]?.sheetImages?.length).map(song => song.id),
       autoMelodies,
-      ...(scorePages.length ? { scorePages } : {}),
       extraSlides: extraSlideCount,
       removedSlideIndexes,
       slideOrder,
@@ -546,30 +507,12 @@ export function WorshipApp() {
       slideTextOverrides,
       slideTextColors,
       externalSongs: selected.filter((song) => song.id < 0 || (cloudflareMode && song.lyrics?.trim())).map((song) => ({ id: song.id, title: song.title, artist: song.artist, lyrics: song.lyrics ?? '' })),
-      ...(existingPptData ? { pptxBase64: existingPptData } : {}),
-      style: { ...pptStyle, ...(backgroundImage ? { backgroundImageBase64: backgroundImage.dataUrl.split(',')[1], backgroundImageType: backgroundImage.type } : {}) },
+      style: pptStyle,
     };
   }
 
   useEffect(() => {
-    setExistingPptData(null);
-    setExistingPptError('');
-    if (!existingPpt) return;
-    const reader = new FileReader();
-    reader.onload = () => setExistingPptData(String(reader.result).split(',')[1]);
-    reader.onerror = () => setExistingPptError('기존 PPTX 파일을 읽지 못했습니다.');
-    reader.readAsDataURL(existingPpt);
-    return () => { if (reader.readyState === FileReader.LOADING) reader.abort(); };
-  }, [existingPpt]);
-
-  useEffect(() => {
     const controller = new AbortController();
-    if (!validStyle) { setPreviewLoading(false); setPreviewError('글꼴과 글자 크기, 줄 수를 확인해 주세요.'); return; }
-    if (existingPpt && (!existingPpt.name.toLowerCase().endsWith('.pptx') || existingPpt.size > 20_000_000)) {
-      setPreviewLoading(false); setPreviewError('20MB 이하의 PPTX 파일을 선택해 주세요.'); return;
-    }
-    if (existingPptError) { setPreviewLoading(false); setPreviewError(existingPptError); return; }
-    if (existingPpt && !existingPptData) { setPreviewLoading(true); return; }
     setPreviewLoading(true); setPreviewError('');
     const timer = window.setTimeout(async () => {
       try {
@@ -592,7 +535,7 @@ export function WorshipApp() {
       }
     }, 0);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [selected, pptStyle, backgroundImage, slideSize, existingPpt, existingPptData, existingPptError, validStyle, previewRetry, extraSlideCount, removedSlideIndexes, slideOrder, slideTextColors, scorePages, autoMelodies, slideTextOverrides]);
+  }, [selected, pptStyle, slideSize, previewRetry, extraSlideCount, removedSlideIndexes, slideOrder, slideTextColors, autoMelodies, slideTextOverrides]);
 
   useEffect(() => {
     if (!prepared) return;
@@ -706,47 +649,27 @@ export function WorshipApp() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = darkMode ? 'dark' : 'light';
-    try { window.localStorage.setItem('yebit.dark-mode', String(darkMode)); } catch { /* 화면 설정은 저장할 수 없는 환경에서도 적용합니다. */ }
+    try { window.localStorage.setItem('yebit.dark-mode', String(darkMode)); } catch { /* 저장할 수 없는 환경에서도 화면 설정은 적용합니다. */ }
   }, [darkMode]);
-
-  const normalizedLiveQuery = recentTitleKey(query);
-  const searchingByNumber = /^\d{1,3}$/.test(query.trim());
-  const libraryMatches = normalizedLiveQuery ? [...new Map([...readySongs, ...allSongs].map(song => [song.id, song])).values()]
-    .filter(song => searchingByNumber ? song.hymnNumber === Number(query) :
-      [song.title, song.artist, song.author, song.composer].some(value => value && recentTitleKey(value).includes(normalizedLiveQuery)))
-    .sort((a, b) => Number(recentTitleKey(b.title) === normalizedLiveQuery) - Number(recentTitleKey(a.title) === normalizedLiveQuery)) : [];
-  const additionalLiveSongMatches = libraryMatches.filter(song => !results.some(result => result.id === song.id)).slice(0, 6);
 
   function searchSongs(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!normalizedLiveQuery) return;
-    setResults(libraryMatches);
-    setSearchNotice({ text: libraryMatches.length || !searchingByNumber
-      ? '미리 볼 곡을 선택해 주세요.' : '이 번호에 해당하는 찬송가를 찾지 못했습니다.' });
-  }
+    const title = query.trim();
+    const key = recentTitleKey(title);
+    if (!key) return;
 
-  async function uploadLyricsAudio(file: File) {
-    if (!file.size || file.size > 20 * 1024 * 1024) {
-      setPptNotice({text:'20MB 이하 음원 파일을 선택해 주세요.',kind:'error'}); return;
+    const byNumber = /^\d{1,3}$/.test(title);
+    const library = new Map([...readySongs, ...allSongs].map(song => [song.id, song]));
+    const matches = [...library.values()].filter(song => byNumber
+      ? song.hymnNumber === Number(title)
+      : [song.title, song.artist, song.author, song.composer].some(value => value && recentTitleKey(value).includes(key)));
+    matches.sort((a, b) => Number(recentTitleKey(b.title) === key) - Number(recentTitleKey(a.title) === key));
+    if (!byNumber && !matches.some(song => recentTitleKey(song.title) === key)) {
+      matches.push(songFromTitle(title));
     }
-    setPptNotice({text:'음원 가사를 분석하고 PPT를 만들고 있습니다.'});
-    try {
-      const response = await fetch('/api/audio-lyrics', {method:'POST',body:file,signal:AbortSignal.timeout(300000)});
-      const result = await response.json() as {lyrics?:string[];pptxBase64?:string;cacheHit?:boolean;timings?:{total:number};detail?:string;error?:string};
-      if (!response.ok || !result.lyrics?.length || !result.pptxBase64) throw new Error(result.error || result.detail || '음원에서 가사를 가져오지 못했습니다.');
-      const song: Song = {id:-Date.now(),title:file.name.replace(/\.[^.]+$/, ''),artist:null,author:null,composer:null,
-        status:'USER_SUPPLIED',category:null,hymnNumber:null,source:'audio-upload',lyricsFromAudio:true,lyrics:lyricsPreviewText(result.lyrics.join('\n'))};
-      setActiveSong(null); changeEditorTab('songs');
-      setSelected(items => [...items, song]);
-      setRemovedSlideIndexes([]); setSlideOrder([]);setSlidePositions({});setSlideTextOverrides({});setSlideTextColors({});
-      const binary = Uint8Array.from(atob(result.pptxBase64), char => char.charCodeAt(0));
-      const url = URL.createObjectURL(new Blob([binary],{type:'application/vnd.openxmlformats-officedocument.presentationml.presentation'}));
-      const link = document.createElement('a'); link.href=url;link.download=`${song.title}.pptx`;link.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 10000);
-      setPptNotice({text:`${result.cacheHit ? '저장된 가사 사용' : '가사 추출 완료'} · ${(result.timings?.total ?? 0).toFixed(2)}초 · PPT 생성 완료`,kind:'success'});
-    } catch(error) {
-      setPptNotice({text:error instanceof Error ? error.message : '음원 처리에 실패했습니다.',kind:'error'});
-    }
+
+    setResults(matches);
+    setSearchNotice(matches.length ? null : { text: '이 번호에 해당하는 찬송가를 찾지 못했습니다.' });
   }
 
   function addSelection(song: Song) {
@@ -858,11 +781,6 @@ export function WorshipApp() {
     setEditingSlide(null);
   }
 
-  function updateStyle(change: Partial<PptStyle>) {
-    setPptStyle((current) => ({ ...current, ...change }));
-    setTemplate('custom');
-  }
-
   function startTextBoxInteraction(event: ReactPointerEvent<HTMLElement>, slide: number, position: SlideTextPosition, mode: 'move' | 'resize' = 'move') {
     const element = (mode === 'resize' ? event.currentTarget.parentElement : event.currentTarget) as HTMLDivElement | null;
     if (!element) return;
@@ -909,26 +827,6 @@ export function WorshipApp() {
     textBoxInteraction.current = null;
   }
 
-  function applyBackgroundFile(file?: File) {
-    if (!file) return;
-    if (!['image/png', 'image/jpeg'].includes(file.type) || file.size > 5_000_000 || file.size === 0) {
-      setPptNotice({ text: '배경 이미지는 5MB 이하의 PNG 또는 JPEG 파일을 선택해 주세요.', kind: 'error' });
-      return;
-    }
-    const reader = new FileReader();
-    reader.onerror = () => setPptNotice({ text: '배경 이미지를 읽지 못했습니다.', kind: 'error' });
-    reader.onload = () => {
-      setBackgroundImage({ dataUrl: String(reader.result), type: file.type === 'image/png' ? 'PNG' : 'JPEG', name: file.name });
-      setPptNotice(null);
-    };
-    reader.readAsDataURL(file);
-  }
-
-  function chooseBackground(event: React.ChangeEvent<HTMLInputElement>) {
-    applyBackgroundFile(event.target.files?.[0]);
-    event.target.value = '';
-  }
-
   async function submitAuth(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setAuthError('');
@@ -958,6 +856,14 @@ export function WorshipApp() {
     }
   }
 
+  function switchAuthMode() {
+    setAuthMode((mode) => mode === 'login' ? 'signup' : 'login');
+    setAuthError('');
+    setAuthFieldErrors({});
+    setAuthPassword('');
+    setAuthPasswordVisible(false);
+  }
+
   async function signOut() {
     try { await authRequest<{ loggedOut: boolean }>('/auth/logout', 'POST'); } catch { /* 세션이 이미 만료된 경우에도 화면에서 로그아웃합니다. */ }
     setAuthUser(null);
@@ -970,18 +876,6 @@ export function WorshipApp() {
     if (unavailable) {
       const status = melodyStatusFor(unavailable);
       setPptNotice({ text: `${unavailable.title} · ${status?.message ?? 'PPT를 불러오는 중입니다.'}`, kind: 'error' });
-      return;
-    }
-    if (existingPpt && (!existingPpt.name.toLowerCase().endsWith('.pptx') || existingPpt.size > 20_000_000)) {
-      setPptNotice({ text: '20MB 이하의 PPTX 파일을 선택해 주세요.', kind: 'error' });
-      return;
-    }
-    if (!validStyle) {
-      setPptNotice({ text: '글꼴 이름, 글자 크기(16~100), 한 장의 줄 수(1~6)를 확인해 주세요.', kind: 'error' });
-      return;
-    }
-    if (existingPpt && !existingPptData) {
-      setPptNotice({ text: existingPptError || '기존 PPTX 파일을 읽는 중입니다.', kind: 'error' });
       return;
     }
     setCreating(true);
@@ -1007,7 +901,6 @@ export function WorshipApp() {
         setSearchOpen(false);
         setEditingSlide(null);
         setSelectedTextSlide(null);
-        setFontListOpen(false);
         setSizeOpen(false);
         setTitleEditOpen(false);
         return;
@@ -1039,7 +932,7 @@ export function WorshipApp() {
 
     document.addEventListener('keydown', handleEditorShortcuts);
     return () => document.removeEventListener('keydown', handleEditorShortcuts);
-  }, [activeSong, candidateScore, selected, page, prepared]);
+  }, [activeSong, selected, page, prepared]);
 
   async function importFiles(event: React.ChangeEvent<HTMLInputElement>) {
     const files = [...(event.target.files ?? [])];
@@ -1097,6 +990,10 @@ export function WorshipApp() {
                 <p className={`auth-error${authError ? ' is-visible' : ''}`} role="alert">{authError || '\u00a0'}</p>
                 <button className="auth-submit" type="submit" disabled={authSubmitting}>{authSubmitting ? '처리 중…' : authMode === 'login' ? '로그인' : '회원가입'}</button>
               </form>
+              <div className="auth-mobile-switch">
+                <span>{authMode === 'login' ? '계정이 없으신가요?' : '이미 계정이 있으신가요?'}</span>
+                <button type="button" onClick={switchAuthMode} disabled={authSubmitting}>{authMode === 'login' ? '회원가입' : '로그인'}</button>
+              </div>
             </>}
           </div>
         </div>
@@ -1106,7 +1003,7 @@ export function WorshipApp() {
             <h2>{authMode === 'login' ? '다시 만나 반가워요' : '환영합니다'}</h2>
             <span>{authMode === 'login' ? '로그인하고 이어서 찬양 PPT를 준비하세요.' : '계정을 만들고 예배 찬양을 위한 PPT를 준비해 보세요.'}</span>
           </div>
-          <button type="button" className="auth-mode-toggle" onClick={() => { setAuthMode((mode) => mode === 'login' ? 'signup' : 'login'); setAuthError(''); setAuthFieldErrors({}); setAuthPassword(''); setAuthPasswordVisible(false); }} disabled={authStatus === 'checking'}>{authMode === 'login' ? '회원가입' : '로그인'}</button>
+          <button type="button" className="auth-mode-toggle" onClick={switchAuthMode} disabled={authStatus === 'checking'}>{authMode === 'login' ? '회원가입' : '로그인'}</button>
         </aside>
       </section>
     </main>;
@@ -1131,7 +1028,7 @@ export function WorshipApp() {
       </header>}
 
       {page === 'create' ? (
-        <main className={`editor-page${inspectorDock === 'left' ? ' is-inspector-left' : ''}${inspectorCollapsed ? ' is-inspector-collapsed' : ''}`} id="create" style={{ '--inspector-width': `${inspectorWidth}px` } as CSSProperties} onPointerDownCapture={(event) => { const target = event.target; if (target instanceof Element && target.closest('.editor-slide-text, .text-box-handle, .inspector-resize-handle')) return; setSelectedTextSlide(null); }}>
+        <main className="editor-page" id="create" onPointerDownCapture={(event) => { const target = event.target; if (target instanceof Element && target.closest('.editor-slide-text, .text-box-handle')) return; setSelectedTextSlide(null); }}>
           <aside className="editor-sidebar" aria-label="찬양 곡 선택">
             <a className="editor-brand" href="#create" aria-label="Yebit 찬양 PPT 제작">
               <img src="/assets/figma/editor-logo.png" width="42" height="42" alt="" />
@@ -1140,19 +1037,48 @@ export function WorshipApp() {
             <div ref={searchWidgetRef} className="editor-search-shell" onPointerMove={trackSearchGlassReflection} onPointerLeave={resetSearchGlassReflection}>
               {!searchOpen ? <button className="editor-search-widget" type="button" aria-label="곡 제목 또는 찬송가 번호 검색" onClick={() => setSearchOpen(true)}>
                 <span className="editor-search-off"><img src="/assets/figma/search.svg" alt="" /><span>곡 제목 또는 찬송가 번호</span></span>
-              </button> : <div className={`editor-search-widget is-active${query.trim() ? ' has-query' : ''}`}>
+              </button> : <div className={`editor-search-widget is-active${query.trim() || results.length || searchNotice ? ' has-results' : ''}`}>
                 <form className="editor-search" onSubmit={searchSongs}>
                   <label className="visually-hidden" htmlFor="worship-song-search">곡 제목 또는 찬송가 번호</label>
-                  <span className="editor-search-input"><img src="/assets/figma/search.svg" alt="" /><input id="worship-song-search" ref={searchInputRef} autoComplete="off" value={query} onChange={(event) => { setQuery(event.target.value); setSearchNotice(null); setResults([]); }} placeholder="곡 제목 또는 찬송가 번호" /></span>
+                  <span className="editor-search-input"><img src="/assets/figma/search.svg" alt="" /><input id="worship-song-search" ref={searchInputRef} autoComplete="off" maxLength={120} value={query} onChange={(event) => { setQuery(event.target.value); setSearchNotice(null); setResults([]); }} placeholder="곡 제목 또는 찬송가 번호" /></span>
                   <button className="visually-hidden" type="submit" disabled={!query.trim()}>검색</button>
                 </form>
-                {query.trim() && <div className="editor-search-results" aria-live="polite">
-                  {!searchNotice && <p className="search-result-hint">곡을 클릭해 PPT를 미리 볼 수 있습니다.</p>}
-                  {!searchingByNumber && normalizedLiveQuery && !libraryMatches.some(song => recentTitleKey(song.title) === normalizedLiveQuery) &&
-                    <button className="search-result-row" type="button" onClick={() => selectSong(songFromTitle(query.trim().slice(0, 120)))}><strong>{query.trim()}</strong><small>제목으로 악보 PPT 찾기</small></button>}
-                  {searchNotice && <p className={`search-result-hint ${searchNotice.kind ?? ''}`}>{searchNotice.text}</p>}
-                  {results.length > 0 && <div className="search-result-group"><span>내 곡 목록 · {results.length}</span>{results.map((song) => <div className="editor-favorite-row" key={song.id}><button className="search-result-row" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>작사 {displayPerson(song.author)}</small></button><button className={`favorite-toggle${favoriteIds.includes(song.id) ? ' is-favorite' : ''}`} type="button" onClick={() => toggleFavorite(song)} aria-label={favoriteIds.includes(song.id) ? `${song.title} 즐겨찾기 해제` : `${song.title} 즐겨찾기 추가`}>{favoriteIds.includes(song.id) ? '★' : '☆'}</button></div>)}</div>}
-                  {additionalLiveSongMatches.length > 0 && <div className="search-result-group"><span>내 곡 목록</span>{additionalLiveSongMatches.map((song) => <div className="editor-favorite-row" key={song.id}><button className="search-result-row" type="button" onClick={() => selectSong(song)}><strong>{song.title}</strong><small>{displayKnown(song.artist)}</small></button><button className={`favorite-toggle${favoriteIds.includes(song.id) ? ' is-favorite' : ''}`} type="button" onClick={() => toggleFavorite(song)} aria-label={favoriteIds.includes(song.id) ? `${song.title} 즐겨찾기 해제` : `${song.title} 즐겨찾기 추가`}>{favoriteIds.includes(song.id) ? '★' : '☆'}</button></div>)}</div>}
+                {(query.trim() || results.length > 0 || searchNotice) && <div className="editor-search-results" aria-live="polite">
+                  {results.length > 0 ? <div className="search-result-group">
+                    <span>검색 결과</span>
+                    {results.map(song => <div className="editor-favorite-row" key={song.id}>
+                      <button className="search-result-row" type="button" onClick={() => addSearchResult(song)}>
+                        <strong>{song.title}</strong>
+                        {displayKnown(song.artist) && <small>{displayKnown(song.artist)}</small>}
+                      </button>
+                      {song.id > 0 && <button className={`favorite-toggle${favoriteIds.includes(song.id) ? ' is-favorite' : ''}`} type="button"
+                        onClick={() => toggleFavorite(song)} aria-label={favoriteIds.includes(song.id) ? `${song.title} 즐겨찾기 해제` : `${song.title} 즐겨찾기 추가`}>
+                        {favoriteIds.includes(song.id) ? '★' : '☆'}
+                      </button>}
+                    </div>)}
+                  </div> : searchSuggestions.length > 0 ? <>
+                    {searchSuggestions.map((group) => <section className="search-result-group" key={group.label}>
+                      <span>{group.label}</span>
+                      {group.songs.map((song) => <div className="editor-favorite-row" key={`${group.label}:${song.id}`}>
+                        <button className="search-result-row" type="button" onClick={() => addSearchResult(song)}>
+                          <strong>{song.title}</strong>
+                          <small>{displayKnown(song.artist) || (song.hymnNumber ? `새찬송가 ${song.hymnNumber}장` : '곡 선택 후 PPT 제작')}</small>
+                        </button>
+                        {song.id > 0 && <button className={`favorite-toggle${favoriteIds.includes(song.id) ? ' is-favorite' : ''}`} type="button"
+                          onClick={() => toggleFavorite(song)} aria-label={favoriteIds.includes(song.id) ? `${song.title} 즐겨찾기 해제` : `${song.title} 즐겨찾기 추가`}>
+                          {favoriteIds.includes(song.id) ? '★' : '☆'}
+                        </button>}
+                      </div>)}
+                    </section>)}
+                    <p className="search-result-hint search-result-hint--footer">원하는 곡이 안 보이나요? 제목을 더 입력하거나 Enter를 눌러 검색해 보세요.</p>
+                  </> : <div className="search-no-match">
+                    {searchNotice && <p className={`search-result-hint ${searchNotice.kind ?? ''}`}>{searchNotice.text}</p>}
+                    <strong>관련 곡 추천이 아직 없습니다</strong>
+                    <span>곡이 없다는 뜻은 아니에요. 제목을 더 입력하거나 직접 검색해 보세요.</span>
+                    <button type="button" onClick={() => searchInputRef.current?.form?.requestSubmit()} disabled={!query.trim()}>
+                      ‘{query.trim()}’로 검색
+                    </button>
+                  </div>}
                 </div>}
               </div>}
             </div>
@@ -1180,35 +1106,23 @@ export function WorshipApp() {
           </aside>
           <section className="editor-workspace" aria-labelledby="preview-title">
             <div className="editor-toolbar"><div className="editor-toolbar__left"><div className="editor-title-control" ref={titleControlRef}><svg className="editor-title-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round"/><path d="M13 14h5m-2-2 2 2-2 2" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>{titleEditOpen ? <input className="editor-document-title-input" aria-label="프레젠테이션 제목 편집" style={{width:`${Math.max(1, presentationTitle.length)}em`}} autoFocus value={presentationTitle} onChange={(event) => setPresentationTitle(event.target.value)} maxLength={80} onBlur={() => setTitleEditOpen(false)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === 'Escape') { event.preventDefault(); setTitleEditOpen(false); } }} /> : <button className="editor-document-title" type="button" aria-label="프레젠테이션 제목 수정" aria-expanded={titleEditOpen} onClick={() => setTitleEditOpen(true)}><span>{presentationTitle.trim() || '제목 없는 디자인'}</span></button>}</div><div className="editor-size-control" ref={sizeControlRef}><button className="editor-page-count" type="button" aria-label={`슬라이드 크기 ${slideSize.width} 곱하기 ${slideSize.height} 픽셀`} aria-expanded={sizeOpen} onClick={() => setSizeOpen((open) => !open)}><span>{slideSize.width}×{slideSize.height} px</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4.5 7.5 5.5 5 5.5-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button>{sizeOpen && <div className="editor-size-menu"><div className="editor-size-presets">{[{label:'16:9',width:1280,height:720},{label:'16:10',width:1280,height:800},{label:'4:3',width:1280,height:960},{label:'1:1',width:960,height:960}].map((preset) => <button type="button" key={preset.label} aria-pressed={slideSize.width===preset.width&&slideSize.height===preset.height} onClick={() => setSlideSize({width:preset.width,height:preset.height})}>{preset.label}</button>)}</div><div className="editor-size-custom"><label>가로<input type="number" min="320" max="3840" value={slideSize.width} onChange={(event) => setSlideSize((size) => ({...size,width:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label><span>×</span><label>세로<input type="number" min="320" max="3840" value={slideSize.height} onChange={(event) => setSlideSize((size) => ({...size,height:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label></div></div>}</div></div>
-            <div className="editor-toolbar-account"><div className="editor-account-control" ref={accountMenuRef}><button className="editor-account-trigger" type="button" aria-haspopup="menu" aria-expanded={accountMenuOpen} onClick={() => setAccountMenuOpen(open => !open)}><span>{authUser?.email ?? '계정'}</span><span className="editor-account-chevron" aria-hidden="true">⌄</span></button>{accountMenuOpen && <div className="editor-account-menu" role="menu"><button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); setSettingsOpen(true); }}><span aria-hidden="true">⚙</span> 설정</button><button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); void signOut(); }}><span aria-hidden="true">↪</span> 로그아웃</button></div>}</div></div></div>
-            {activeSong && <section className="editor-ppt-candidate" aria-label="악보 PPT 미리보기">
+            <div className="editor-toolbar-account"><button className="editor-toolbar-queue" type="button" onClick={() => { setEditorTab('songs'); window.requestAnimationFrame(() => selectedQueueRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })); }} aria-label={`제작 목록, ${selected.length}곡 · ${preview?.slideCount ?? 1}장`}>{selected.length}곡 · {preview?.slideCount ?? 1}장</button><button className="btn btn--primary editor-toolbar-export" type="button" onClick={createPpt} disabled={creating}>{creating ? '만드는 중…' : 'PPTX 다운로드'}</button><button className={darkMode ? 'editor-theme-toggle is-dark' : 'editor-theme-toggle'} type="button" aria-label={darkMode ? '라이트 모드로 전환' : '다크 모드로 전환'} aria-pressed={darkMode} title={darkMode ? '라이트 모드' : '다크 모드'} onClick={() => setDarkMode(mode => !mode)}>{darkMode ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 15.1A8.5 8.5 0 0 1 8.9 3.8 8.6 8.6 0 1 0 20.2 15.1Z" fill="currentColor"/></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.4" fill="currentColor"/><path d="M12 2v2.2M12 19.8V22M4.93 4.93l1.56 1.56m11.02 11.02 1.56 1.56M2 12h2.2m15.6 0H22M4.93 19.07l1.56-1.56M17.51 6.49l1.56-1.56" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/></svg>}</button><div className="editor-account-control" ref={accountMenuRef}><button className="editor-account-trigger" type="button" aria-haspopup="menu" aria-expanded={accountMenuOpen} onClick={() => setAccountMenuOpen(open => !open)}><span>{authUser?.email ?? '계정'}</span><span className="editor-account-chevron" aria-hidden="true">⌄</span></button>{accountMenuOpen && <div className="editor-account-menu" role="menu"><button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); setSettingsOpen(true); }}><span aria-hidden="true">⚙</span> 설정</button><button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); void signOut(); }}><span aria-hidden="true">↪</span> 로그아웃</button></div>}</div></div></div>
+            {pptNotice && <p className={`editor-ppt-notice notice ${pptNotice.kind ?? ''}`} role="status" aria-live="polite">{pptNotice.text}</p>}
+            {activeSong && <section className="editor-ppt-candidate" aria-label="선택한 곡">
               <div className="editor-ppt-candidate__header">
                 <strong>{activeSong.title}</strong>
-                <button type="button" className="preview-retry" onClick={() => setActiveSong(null)}>닫기</button>
-              </div>
-              {candidateImages.length > 0 ? <>
-                <img src={candidateImages[candidatePage]} alt={`${activeSong.title} ${candidatePage + 1} 페이지`} />
                 <div className="editor-ppt-candidate__actions">
-                  <button type="button" className="preview-retry" disabled={candidatePage === 0} onClick={() => setCandidatePage(page => page - 1)}>이전</button>
-                  <span>{candidatePage + 1} / {candidateImages.length}</span>
-                  <button type="button" className="preview-retry" disabled={candidatePage + 1 >= candidateImages.length} onClick={() => setCandidatePage(page => page + 1)}>다음</button>
+                  <button type="button" className="preview-retry" onClick={() => setActiveSong(null)}>닫기</button>
                   <button type="button" className="btn btn--primary" disabled={Boolean(candidateAdded) || selected.length >= 100} onClick={() => addOriginalPpt(activeSong)}>
-                    {candidateAdded ? '추가됨' : '추가'}
+                    {candidateAdded ? '목록에 추가됨' : '곡 목록에 추가'}
                   </button>
                 </div>
-              </> : <div role="status">
-                <span>{candidateStatus?.message ?? '악보 PPT를 찾는 중입니다.'}</span>
-                {candidateStatus?.state === 'failed' && <button type="button" className="preview-retry" onClick={() => retryMelody(activeSong)}>다시 시도</button>}
-              </div>}
+              </div>
             </section>}
             {statusSong && melodyStatus && <div className="editor-melody-status" role="status">
               <span><strong>{statusSong.title}</strong> · {melodyStatus.message}</span>
               {melodyStatus.state === 'failed' && <button type="button" className="preview-retry" onClick={() => retryMelody(statusSong)}>악보 다시 시도</button>}
             </div>}
-            {editingScore && <ScoreEditor initial={editingScore.score} onClose={() => setEditingScore(null)} onSave={score => {
-              updateScore(editingScore.song, score);
-              setScorePages(pages => pages.filter(page => recentTitleKey(page.title) !== recentTitleKey(editingScore.song.title)));
-            }} />}
             <div className="editor-stage">
               {previewError ? <div className="editor-canvas-message"><strong>미리보기를 열 수 없습니다</strong><span>{previewError}</span><button type="button" className="preview-retry" onClick={() => setPreviewRetry((value) => value + 1)}>다시 시도</button></div> : previewLoading && !prepared ? <div className="editor-canvas-message"><span className="preview-spinner" aria-hidden="true"/><strong>슬라이드를 불러오는 중</strong></div> : <div className="editor-page-stack" onScroll={(event) => { const cards = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[data-slide-index]')); const middle = event.currentTarget.getBoundingClientRect().top + event.currentTarget.clientHeight / 2; const nearest = cards.reduce((best, card) => Math.abs(card.getBoundingClientRect().top + card.offsetHeight / 2 - middle) < Math.abs(best.getBoundingClientRect().top + best.offsetHeight / 2 - middle) ? card : best, cards[0]); if (nearest) { setPreviewIndex(Number(nearest.dataset.slideIndex)); setSelectedTextSlide(null); } }}>
                 {(prepared?.thumbnails ?? []).map((thumbnail, slide) => { const position = slidePositions[slide] ?? prepared?.slides[slide]?.textPosition ?? { x: pptStyle.textX, y: pptStyle.textY, width: pptStyle.textWidth, height: pptStyle.textHeight }; const selectedText = selectedTextSlide === slide; const page = prepared?.slides[slide]; const scoreRows = page?.autoScore && (selectedText || editingSlide === slide || slideTextOverrides[slide] !== undefined) ? undefined : page?.scoreRows; return <div className={`editor-page-sheet ${previewIndex === slide ? 'is-current' : ''}${scoreRows?.length ? ' has-score-rows' : ''}`} data-slide-index={slide} key={displaySlideOrder[slide] ?? slide} style={{aspectRatio:`${slideSize.width} / ${slideSize.height}`}}><img src={`data:image/png;base64,${thumbnail}`} alt="슬라이드 배경"/><div className="editor-slide-text" style={{left:`${position.x-position.width/2}%`,top:`${position.y-position.height/2}%`,width:`${position.width}%`,height:`${position.height}%`,fontFamily:pptStyle.fontFamily,fontSize:`${pptStyle.fontSize/960*100}cqw`,fontWeight:pptStyle.bold?700:400,color:slideTextColors[slide]??pptStyle.textColor,justifyContent:pptStyle.alignment==='LEFT'?'flex-start':pptStyle.alignment==='RIGHT'?'flex-end':'center',lineHeight:1.2}} onClick={() => { if (editingSlide !== slide) { setPreviewIndex(slide); setSelectedTextSlide(slide); } }} onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation(); setPreviewIndex(slide); setSelectedTextSlide(slide); setEditingSlide(slide); }} onPointerDown={(event) => { if (selectedText && editingSlide !== slide && !(event.target instanceof HTMLTextAreaElement)) startTextBoxInteraction(event, slide, position); }} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction} role="button" tabIndex={0} aria-label={`${slide+1}페이지 가사 텍스트 선택`} title="두 번 클릭하여 가사 수정">{editingSlide === slide ? <textarea className="editor-slide-textarea" autoFocus value={slideTextOverrides[slide] ?? prepared?.slides[slide]?.lines.join('\n') ?? ''} onChange={(event) => setSlideTextOverrides((items) => ({ ...items, [slide]: event.target.value }))} onPointerDown={(event) => event.stopPropagation()} onBlur={() => setEditingSlide(null)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setEditingSlide(null); } }} aria-label={`${slide+1}페이지 가사 편집`} /> : <span style={{display:'block',width:'100%',textAlign:pptStyle.alignment.toLowerCase() as CanvasTextAlign}}>{slideTextOverrides[slide] ?? prepared?.slides[slide]?.lines.join('\n')}</span>}</div>{scoreRows?.length ? <ScoreRowsOverlay rows={scoreRows} fontFamily={pptStyle.fontFamily} fontSize={pptStyle.fontSize} color={slideTextColors[slide] ?? pptStyle.textColor} bold={pptStyle.bold} onSelect={page?.autoScore ? () => { setPreviewIndex(slide); setSelectedTextSlide(slide); } : undefined} /> : null}{selectedText && !scoreRows?.length && <div className="text-box-selection" style={{left:`${position.x-position.width/2}%`,top:`${position.y-position.height/2}%`,width:`${position.width}%`,height:`${position.height}%`}} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction} role="group" aria-label="가사 상자 위치와 크기 조절"><i className="text-box-handle text-box-handle--tl"/><i className="text-box-handle text-box-handle--tr"/><i className="text-box-handle text-box-handle--bl"/><button className="text-box-handle text-box-handle--br" type="button" aria-label="가사 상자 크기 조절" onPointerDown={(event) => startTextBoxInteraction(event, slide, position, 'resize')} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction}/></div>}<span className="editor-page-label">{slide + 1} 페이지</span><button className="editor-page-delete" type="button" aria-label={`${slide + 1}페이지 삭제`} onClick={() => removeSlide(slide)}>×</button></div>; })}
@@ -1227,40 +1141,7 @@ export function WorshipApp() {
               <button className="filmstrip-add" type="button" onClick={() => { const nextIndex = preview?.slideCount ?? 1; setExtraSlideCount((count) => count + 1); setPreviewIndex(nextIndex); }} aria-label="페이지 추가"><span aria-hidden="true">＋</span><small>페이지 추가</small></button>
             </div>
           </section>
-          {!inspectorCollapsed && <aside className="editor-inspector" aria-label="슬라이드 편집">
-            <div className="inspector-heading" onPointerDown={startInspectorDockDrag} onPointerUp={stopInspectorDockDrag} onPointerCancel={stopInspectorDockDrag}><div><p className="editor-kicker">편집 도구</p><h2>슬라이드 디자인</h2></div><span className="editor-count">{preview ? `${preview.slideIndex + 1} / ${preview.slideCount}` : '—'}</span><span className="inspector-dock-grip" aria-hidden="true">⠿</span></div>
-            <div className="inspector-controls">
-              <div className="inspector-group"><h3>음원에서 가사 PPT 만들기</h3><label className="file-field"><span className="file-picker-button">음원 선택</span><input type="file" accept="audio/*,.mp3,.wav,.m4a,.flac" onChange={event => { const file=event.target.files?.[0]; if(file) void uploadLyricsAudio(file);event.target.value=''; }}/><small>최대 20MB · 분석한 파일은 저장된 가사를 재사용합니다.</small></label></div><div className="inspector-group"><h3>악보</h3>{scoreControlSong && ['sheet-omr','sheet-image'].includes(scoreFor(scoreControlSong)?.sourceType ?? '') && <p><small>원본 악보의 음표와 가사를 함께 표시합니다.</small>{scoreFor(scoreControlSong)?.sourcePage && <a href={scoreFor(scoreControlSong)?.sourcePage} target="_blank" rel="noreferrer">원본 악보 보기</a>}</p>}{scoreControlSong && scoreFor(scoreControlSong)?.musicxmlUrl && <a className="btn btn--secondary" href={scoreFor(scoreControlSong)?.musicxmlUrl} download="output_sheet.musicxml">MusicXML 다운로드</a>}
-              {editableScore?.notes.length ? (scoreControlSong && <button type="button" className="btn btn--secondary"
-                onClick={() => setEditingScore({ song: scoreControlSong, score: editableScore })}>
-                {editableScore.reviewed ? '수정본 편집' : '자동 채보 초안 편집'}
-              </button>) : null}{scoreControlSong ? <ScoreControls key={`${scoreControlSong.id}:${scoreControlSong.title}`} title={scoreControlSong.title} lyrics={scoreControlSong.lyrics ?? ''} staffColor={slideTextColors[previewIndex] ?? pptStyle.textColor}
-              onAudio={async (file, onWaiting) => {
-                const score = await uploadMelody(scoreControlSong, file, onWaiting);
-                if (!selected.some(song => song.id === scoreControlSong.id)) addSelectionShortcut.current(scoreControlSong);
-                updateScore(scoreControlSong, score);
-                setSelected(items => items.map(song => song.id === scoreControlSong.id ? { ...song, originalPpt: false } : song));
-                setScorePages(pages => pages.filter(page => recentTitleKey(page.title) !== recentTitleKey(scoreControlSong.title)));
-              }}
-              onGenerated={(title, slides) => {
-                if (!selected.some((song) => song.id === scoreControlSong.id)) addSelectionShortcut.current(scoreControlSong);
-                const scoreTitle = scoreControlSong.title || title;
-                scoreNavigationPending.current = recentTitleKey(scoreTitle);
-                setSelected(items => items.map(song => song.id === scoreControlSong.id ? { ...song, originalPpt: false } : song));
-                setScorePages((current) => [...current.filter((score) => recentTitleKey(score.title) !== recentTitleKey(scoreTitle)), { title: scoreTitle, slides }]);
-                setPptNotice({ text: '악보를 현재 PPT 슬라이드에 넣었습니다.', kind: 'success' });
-              }} /> : <div className="score-controls__empty"><p>먼저 악보를 넣을 곡을 선택해 주세요.</p>{recentSongs[0] && <button type="button" className="btn btn--secondary" onClick={() => void openRecentSong(recentSongs[0])}>최근 곡 불러오기 · {recentSongs[0].title}</button>}</div>}</div>
-              <label className="style-field"><span>템플릿</span><select value={template} onChange={(event) => { const value = event.target.value; setTemplate(value); if (templateStyles[value]) setPptStyle({ ...templateStyles[value] }); }}><option value="original">기본 남색</option><option value="sky">맑은 하늘</option><option value="white">깔끔한 흰색</option><option value="black">선명한 검정</option><option value="custom">직접 설정</option></select></label>
-              <div className="inspector-group"><h3>색상</h3><div className="style-grid"><label className="style-field"><span>배경</span><input type="color" value={pptStyle.backgroundColor} onChange={(event) => updateStyle({ backgroundColor: event.target.value })} /></label><label className="style-field"><span>글자</span><input type="color" value={slideTextColors[previewIndex] ?? pptStyle.textColor} onChange={(event) => setSlideTextColors((colors) => ({ ...colors, [previewIndex]: event.target.value }))} /></label></div></div>
-              <div className="inspector-group"><h3>글자</h3><div className="style-grid"><div className="style-field style-field--wide font-picker"><span>글꼴</span><div className="font-search-glass"><input type="search" value={fontQuery} onFocus={() => setFontListOpen(true)} onChange={(event) => { setFontQuery(event.target.value); setFontListOpen(true); }} placeholder={pptStyle.fontFamily || '글꼴 검색'} aria-label="글꼴 검색" aria-expanded={fontListOpen}/><button type="button" aria-label="글꼴 목록 열기" onClick={() => setFontListOpen((open) => !open)}>⌄</button></div>{fontListOpen && <div className="font-options" role="listbox">{fontOptions.filter((font) => font.toLocaleLowerCase().includes(fontQuery.trim().toLocaleLowerCase())).map((font) => <button type="button" role="option" aria-selected={pptStyle.fontFamily === font} key={font} style={{fontFamily:font}} onClick={() => { updateStyle({fontFamily:font.includes('Malgun Gothic') ? 'Malgun Gothic' : font.includes('NanumGothic') ? 'NanumGothic' : font}); setFontQuery(''); setFontListOpen(false); }}>{font}</button>)}{fontQuery.trim() && !fontOptions.some((font) => font.toLocaleLowerCase() === fontQuery.trim().toLocaleLowerCase()) && <button type="button" role="option" onClick={() => { updateStyle({fontFamily:fontQuery.trim()}); setFontListOpen(false); }}>{fontQuery.trim()} 사용</button>}</div>}</div><label className="style-field"><span>크기</span><input type="number" min="16" max="100" value={pptStyle.fontSize || ''} onChange={(event) => updateStyle({ fontSize: Number(event.target.value) })} /></label><label className="style-field"><span>한 장의 줄 수</span><input type="number" min="1" max="6" value={pptStyle.linesPerSlide || ''} onChange={(event) => updateStyle({ linesPerSlide: Number(event.target.value) })} /></label><label className="style-field style-field--wide"><span>정렬</span><select value={pptStyle.alignment} onChange={(event) => updateStyle({ alignment: event.target.value as PptStyle['alignment'] })}><option value="LEFT">왼쪽</option><option value="CENTER">가운데</option><option value="RIGHT">오른쪽</option></select></label><div className="text-align-actions style-field--wide"><button type="button" onClick={() => { const fallback = prepared?.slides[previewIndex]?.textPosition ?? { x: 50, y: 50, width: pptStyle.textWidth, height: pptStyle.textHeight }; setSlidePositions((items) => ({ ...items, [previewIndex]: { ...(items[previewIndex] ?? fallback), x: 50, y: 50 } })); setPptStyle((style) => ({ ...style, alignment: 'CENTER' })); }}>가운데 정렬</button></div><label className="style-check"><input type="checkbox" checked={pptStyle.bold} onChange={(event) => updateStyle({ bold: event.target.checked })} /> 굵게</label></div></div>
-              {pptStyle.fontSize * pptStyle.linesPerSlide * 1.2 > 300 && <p className="style-hint">글자 크기와 줄 수가 크면 가사가 잘릴 수 있습니다.</p>}
-              <div className="inspector-group"><h3>배경 이미지</h3><div className={`image-drop-zone${backgroundDropActive ? ' is-drag-over' : ''}`} onDragEnter={(event) => { event.preventDefault(); setBackgroundDropActive(true); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setBackgroundDropActive(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setBackgroundDropActive(false); }} onDrop={(event) => { event.preventDefault(); setBackgroundDropActive(false); applyBackgroundFile(event.dataTransfer.files[0]); }}><label className="file-field"><span className="file-picker-button">이미지 선택</span><input key={imageInputKey} type="file" accept="image/png,image/jpeg" onChange={chooseBackground} /><small>{backgroundImage ? backgroundImage.name : '이미지를 끌어 놓거나 선택하세요 · PNG/JPEG, 최대 5MB'}</small></label></div>{backgroundImage && <button type="button" className="clear-image" onClick={() => { setBackgroundImage(null); setImageInputKey((key) => key + 1); }}>배경 이미지 제거</button>}</div>
-              <div className="inspector-group"><h3>기존 PPT</h3><label className="file-field"><span className="file-picker-button">PPTX 선택</span><input type="file" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" onChange={(event) => setExistingPpt(event.target.files?.[0] ?? null)} /><small>{existingPpt ? `${existingPpt.name} · 기존 슬라이드 뒤에 추가` : '최대 20MB · 새 슬라이드에 디자인 적용'}</small></label></div>
-              {pptNotice && <p className={`notice ${pptNotice.kind ?? ''}`} role="status" aria-live="polite">{pptNotice.text}</p>}
-            </div>
-            <div className="inspector-footer"><button className="editor-queue-link" type="button" onClick={() => { setEditorTab('songs'); window.requestAnimationFrame(() => selectedQueueRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })); }} aria-label={`제작 목록, ${selected.length}곡 · ${preview?.slideCount ?? 1}장`}>{selected.length}곡 · {preview?.slideCount ?? 1}장 <span>제작 목록</span></button><button className="btn btn--primary" type="button" onClick={createPpt} disabled={creating}>{creating ? '만드는 중…' : 'PPTX 다운로드'}</button></div>
-          </aside>}
-          <div className={`inspector-resize-handle is-${inspectorDock}${inspectorCollapsed ? ' is-collapsed' : ''}`} role="separator" aria-orientation="vertical" aria-label={inspectorCollapsed ? '끌어서 편집 도구 열기' : '끌어서 편집 도구 크기 조절 또는 숨기기'} aria-valuemin={0} aria-valuemax={520} aria-valuenow={inspectorCollapsed ? 0 : Math.round(inspectorWidth)} tabIndex={0} onPointerDown={startInspectorResize} onPointerMove={resizeInspector} onPointerUp={stopInspectorResize} onPointerCancel={stopInspectorResize} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); const direction = event.key === 'ArrowRight' ? 1 : -1; setInspectorWidth((width) => Math.max(240, Math.min(520, width + direction * (event.shiftKey ? 32 : 12)))); setInspectorCollapsed(false); } else if (event.key === 'Enter' && inspectorCollapsed) setInspectorCollapsed(false); }} />
+
         </main>
       ) : (
         <main className="manage-page" id="manage">
@@ -1305,7 +1186,7 @@ export function WorshipApp() {
       {settingsOpen && <div className="account-settings-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsOpen(false); }}>
         <section className="account-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="account-settings-title">
           <header><div><p>계정 설정</p><h2 id="account-settings-title">화면 설정</h2></div><button type="button" aria-label="설정 닫기" onClick={() => setSettingsOpen(false)}>×</button></header>
-          <label className="account-theme-setting"><span><strong>다크 모드</strong><small>어두운 환경에서 편하게 볼 수 있도록 화면 색상을 바꿉니다.</small></span><input type="checkbox" role="switch" checked={darkMode} onChange={(event) => setDarkMode(event.target.checked)} /></label>
+          <div className="account-settings-account"><span>로그인 계정</span><strong>{authUser?.email ?? "계정 정보 없음"}</strong><small>화면 밝기는 상단의 해·달 버튼으로 바로 바꿀 수 있습니다.</small></div>
         </section>
       </div>}
       {page === 'manage' && <footer className="app-footer closing"><span>찬양 PPT</span><span>예배 자료 제작 도구</span><a className="link" href="#create">PPT 제작</a></footer>}
