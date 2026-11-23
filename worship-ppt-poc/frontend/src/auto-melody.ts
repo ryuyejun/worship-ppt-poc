@@ -57,7 +57,11 @@ async function fetchJob(url: string, init?: RequestInit): Promise<Job> {
   const response = await fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(15_000) });
   if (response.status === 413) throw new Error('파일 또는 악보 데이터가 너무 큽니다.');
   if (response.status === 409) throw new Error('이미 새 수정본이 저장됐습니다. 악보를 다시 열어 주세요.');
-  if (!response.ok) throw new Error('악보 서버에 연결하지 못했습니다.');
+  if (!response.ok) {
+    const problem = await response.json().catch(() => null) as { error?: unknown; detail?: unknown } | null;
+    const message = problem?.error ?? problem?.detail;
+    throw new Error(typeof message === 'string' ? message : '악보 서버에 연결하지 못했습니다.');
+  }
   return response.json();
 }
 

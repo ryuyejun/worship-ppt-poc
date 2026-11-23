@@ -237,7 +237,7 @@ export default {
       const title = url.searchParams.get('title')?.trim();
       const artist = url.searchParams.get('artist')?.trim() ?? '';
       if (!melodyJobPath && (!title || title.length > 120 || artist.length > 120)) return fail('곡 제목을 확인해 주세요.', 400);
-      if (!env.AUTO_MELODY_ORIGIN || !env.AUTO_MELODY_TOKEN) return fail('멜로디 분석을 사용할 수 없습니다.', 503);
+      if (!env.AUTO_MELODY_ORIGIN || !env.AUTO_MELODY_TOKEN) return fail('이 배포에 악보 PPT 변환 서버가 아직 연결되지 않았습니다.', 503);
       try {
         const user = await verifyAccessCookie(request, env);
         if (!user) return fail('로그인이 필요합니다.', 401);
