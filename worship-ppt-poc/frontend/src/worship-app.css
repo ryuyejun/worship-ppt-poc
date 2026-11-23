@@ -456,12 +456,12 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
   .editor-sidebar { order: 1; width: 100%; min-height: 540px; flex: 0 0 540px; border-top: 0; border-right: 0; border-bottom: 1px solid rgba(0,0,0,.12); }
   main.editor-page > section.editor-workspace { order: 2; width: 100%; min-height: 550px; }
   .editor-toolbar { flex-basis: 58px; height: 58px; }
-  .editor-toolbar__left { right: 150px; left: 8px; min-width: 0; gap: 6px; }
+  .editor-toolbar__left { right: 120px; left: 8px; min-width: 0; gap: 6px; }
   .editor-title-icon { display: none; }
   .editor-document-title { max-width: clamp(54px, 22vw, 110px); }
   .editor-title-control { min-width: 0; gap: 5px; }
   .editor-document-title-input { width: clamp(54px, 22vw, 110px); max-width: clamp(54px, 22vw, 110px); font-size: 13px; }
-  .editor-size-control .editor-page-count { width: 104px; height: 34px; font-size: 12px; }
+  .editor-toolbar .editor-size-control .editor-page-count { width: 104px; height: 34px; font-size: 12px; }
   .editor-toolbar-account { right: 6px; gap: 2px; }
   .editor-toolbar-account .editor-toolbar-export { width: 40px; min-width: 40px; padding-inline: 0; font-size: 0; }
   .editor-toolbar-account .editor-toolbar-export::after { content: 'PPTX'; font-size: 10px; }
