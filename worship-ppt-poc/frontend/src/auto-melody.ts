@@ -5,7 +5,9 @@ export type AutoMelody = {
   title: string;
   sourceType?: string;
   sourcePage?: string;
+  sourceFileUrl?: string;
   sheetImages?: string[];
+  sheetImageCount?: number;
   musicxmlUrl?: string;
   bpm: number;
   key?: string | null;
@@ -27,8 +29,10 @@ type Job = {
   score?: {
     sourceType?: string;
     sourcePage?: string;
+    sourceFileUrl?: string;
     sheetImages?: string[];
-  musicxmlUrl?: string;
+    sheetImageCount?: number;
+    musicxmlUrl?: string;
     bpm: number;
     key?: string | null;
     lyricsStart?: number | null;
@@ -54,7 +58,7 @@ type MelodyStatus = { state: 'loading' | 'waiting' | 'failed'; message: string }
 const jobsUrl = '/api/auto-melody/jobs';
 
 async function fetchJob(url: string, init?: RequestInit): Promise<Job> {
-  const response = await fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(15_000) });
+  const response = await fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(55_000) });
   if (response.status === 413) throw new Error('파일 또는 악보 데이터가 너무 큽니다.');
   if (response.status === 409) throw new Error('이미 새 수정본이 저장됐습니다. 악보를 다시 열어 주세요.');
   if (!response.ok) {
@@ -65,11 +69,182 @@ async function fetchJob(url: string, init?: RequestInit): Promise<Job> {
   return response.json();
 }
 
-function readScore(title: string, job: Job): AutoMelody {
-  const payload = job.score;
-  if ((!payload?.notes.length && !payload?.sheetImages?.length) || !job.revision) throw new Error('악보 결과가 비어 있습니다.');
+async function fetchSheetImage(jobId: string, index: number) {
+  const response = await fetch(`${jobsUrl}/${jobId}/slides/${index}`, { signal: AbortSignal.timeout(30_000) });
+  if (!response.ok) throw new Error('악보 PPT 페이지를 불러오지 못했습니다.');
+  const blob = await response.blob();
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('악보 이미지를 읽지 못했습니다.'));
+    reader.onerror = () => reject(new Error('악보 이미지를 읽지 못했습니다.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function fetchPresentationFile(url: string) {
+  const chunkSize = 3 * 1024 * 1024;
+  const first = await fetch(url, {
+    headers: { Range: `bytes=0-${chunkSize - 1}` },
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!first.ok) throw new Error('원본 악보 PPT를 다운로드하지 못했습니다.');
+  if (first.status !== 206) {
+    const blob = await first.blob();
+    if (blob.size > 20 * 1024 * 1024) throw new Error('악보 PPT 파일이 너무 큽니다.');
+    return new Uint8Array(await blob.arrayBuffer());
+  }
+
+  const contentRange = first.headers.get('content-range')?.match(/^bytes 0-(\d+)\/(\d+)$/);
+  const firstBytes = new Uint8Array(await first.arrayBuffer());
+  const firstEnd = Number(contentRange?.[1]);
+  const fileSize = Number(contentRange?.[2]);
+  if (!Number.isInteger(fileSize) || fileSize < 1 || fileSize > 20 * 1024 * 1024
+      || !Number.isInteger(firstEnd) || firstEnd < 0 || firstEnd >= fileSize
+      || firstBytes.length !== firstEnd + 1) throw new Error('악보 PPT 파일 크기를 확인할 수 없습니다.');
+  const bytes = new Uint8Array(fileSize);
+  bytes.set(firstBytes, 0);
+  for (let start = firstBytes.length; start < fileSize; start += chunkSize * 3) {
+    const ranges = Array.from({ length: Math.min(3, Math.ceil((fileSize - start) / chunkSize)) }, (_, index) => {
+      const rangeStart = start + index * chunkSize;
+      return [rangeStart, Math.min(fileSize - 1, rangeStart + chunkSize - 1)] as const;
+    });
+    const chunks = await Promise.all(ranges.map(async ([rangeStart, rangeEnd]) => {
+      const response = await fetch(url, {
+        headers: { Range: `bytes=${rangeStart}-${rangeEnd}` },
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!response.ok || response.status !== 206) throw new Error('악보 PPT 페이지 데이터를 받지 못했습니다.');
+      const data = new Uint8Array(await response.arrayBuffer());
+      if (data.length !== rangeEnd - rangeStart + 1) throw new Error('악보 PPT 페이지 데이터가 일부 누락됐습니다.');
+      return { start: rangeStart, data };
+    }));
+    for (const chunk of chunks) bytes.set(chunk.data, chunk.start);
+  }
+  return bytes;
+}
+
+async function imageFromBlob(blob: Blob) {
+  if (typeof createImageBitmap === 'function') {
+    const bitmap = await createImageBitmap(blob);
+    return {
+      width: bitmap.width,
+      height: bitmap.height,
+      draw: (context: CanvasRenderingContext2D) => context.drawImage(bitmap, 0, 0),
+      dispose: () => bitmap.close(),
+    };
+  }
+  const url = URL.createObjectURL(blob);
+  const image = new Image();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error('악보 페이지 이미지를 열지 못했습니다.'));
+      image.src = url;
+    });
+  } catch (error) {
+    URL.revokeObjectURL(url);
+    throw error;
+  }
   return {
-    title, sheetImages: payload.sheetImages, sourceType: payload.sourceType, sourcePage: payload.sourcePage, musicxmlUrl: payload.musicxmlUrl, jobId: job.jobId, revision: job.revision, reviewed: payload.reviewed,
+    width: image.naturalWidth,
+    height: image.naturalHeight,
+    draw: (context: CanvasRenderingContext2D) => context.drawImage(image, 0, 0),
+    dispose: () => URL.revokeObjectURL(url),
+  };
+}
+
+function containsStaff(canvas: HTMLCanvasElement) {
+  const width = Math.min(1200, canvas.width);
+  const height = Math.max(1, Math.round(canvas.height * width / canvas.width));
+  if (height < 20) return false;
+  const probe = document.createElement('canvas');
+  probe.width = width;
+  probe.height = height;
+  const context = probe.getContext('2d', { willReadFrequently: true });
+  if (!context) return false;
+  context.drawImage(canvas, 0, 0, width, height);
+  const pixels = context.getImageData(0, 0, width, height).data;
+  const darkRows: number[] = [];
+  for (let y = 0; y < height; y++) {
+    let dark = 0;
+    for (let x = 0; x < width; x++) {
+      const offset = (y * width + x) * 4;
+      const gray = (pixels[offset] * 299 + pixels[offset + 1] * 587 + pixels[offset + 2] * 114) / 1000;
+      if (gray < 110) dark++;
+    }
+    if (dark / width > 0.15) darkRows.push(y);
+  }
+  const bands: number[] = [];
+  for (let index = 0; index < darkRows.length;) {
+    let end = index;
+    while (end + 1 < darkRows.length && darkRows[end + 1] - darkRows[end] <= 1) end++;
+    if (end - index <= 3) bands.push((darkRows[index] + darkRows[end]) / 2);
+    index = end + 1;
+  }
+  for (let start = 0; start + 4 < bands.length; start++) {
+    const gaps = bands.slice(start, start + 5).slice(1).map((value, index) => value - bands[start + index]);
+    const sorted = [...gaps].sort((a, b) => a - b);
+    const spacing = sorted[2];
+    if (spacing >= 4 && spacing <= 45 && gaps.every(gap => Math.abs(gap - spacing) <= 1.8)) return true;
+  }
+  return false;
+}
+
+async function renderPresentationFile(sourceUrl: string) {
+  const bytes = await fetchPresentationFile(sourceUrl);
+  try {
+    const { parse, slideToPng } = await import('@web-ppt/core');
+    const presentation = await parse(bytes);
+    try {
+      if (!presentation.slides.length || presentation.slides.length > 40) throw new Error('악보 PPT의 페이지 수를 지원하지 않습니다.');
+      const canvas = document.createElement('canvas');
+      const slides: string[] = [];
+      let hasScore = false;
+      const scale = Math.min(1600 / presentation.width, 2);
+      for (const slide of presentation.slides) {
+        const blob = await slideToPng(presentation, slide, scale);
+        const image = await imageFromBlob(blob);
+        try {
+          canvas.width = image.width;
+          canvas.height = image.height;
+          const context = canvas.getContext('2d', { willReadFrequently: true });
+          if (!context) throw new Error('악보 페이지를 표시할 수 없습니다.');
+          context.fillStyle = '#fff';
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          image.draw(context);
+          hasScore ||= containsStaff(canvas);
+          slides.push(canvas.toDataURL('image/jpeg', 0.91));
+        } finally {
+          image.dispose();
+        }
+      }
+      if (!hasScore) throw new Error('찾은 PPT에서 악보 오선을 확인하지 못했습니다.');
+      return slides;
+    } finally {
+      presentation.dispose?.();
+    }
+  } catch (error) {
+    if (error instanceof Error && (error.message.includes('악보 PPT') || error.message.includes('찾은 PPT'))) throw error;
+    throw new Error('원본 악보 PPT를 미리보기로 변환하지 못했습니다.');
+  }
+}
+
+async function readScore(title: string, job: Job): Promise<AutoMelody> {
+  const payload = job.score;
+  if ((!payload?.notes.length && !payload?.sheetImages?.length && !payload?.sheetImageCount && !payload?.sourceFileUrl) || !job.revision) throw new Error('악보 결과가 비어 있습니다.');
+  let sheetImages = payload?.sheetImages;
+  if (!sheetImages && payload?.sourceFileUrl) sheetImages = await renderPresentationFile(payload.sourceFileUrl);
+  if (!sheetImages && payload?.sheetImageCount) {
+    if (payload.sheetImageCount > 40) throw new Error('악보 PPT 페이지 수가 너무 많습니다.');
+    sheetImages = [];
+    for (let start = 0; start < payload.sheetImageCount; start += 5) {
+      sheetImages.push(...await Promise.all(Array.from(
+        { length: Math.min(5, payload.sheetImageCount - start) }, (_, offset) => fetchSheetImage(job.jobId, start + offset),
+      )));
+    }
+  }
+  return {
+    title, sheetImages, sourceType: payload.sourceType, sourcePage: payload.sourcePage, musicxmlUrl: payload.musicxmlUrl, jobId: job.jobId, revision: job.revision, reviewed: payload.reviewed,
     bpm: payload.bpm, key: payload.key, lyricsStart: payload.lyricsStart, videoId: payload.videoId,
     vocalStartSec: payload.vocalStartSec ?? 0, vocalEndSec: payload.vocalEndSec ?? 0,
     notes: payload.notes.map(note => ({
@@ -153,14 +328,14 @@ export async function reloadAutoMelody(melody: AutoMelody) {
   return readScore(melody.title, await fetchJob(`${jobsUrl}/${melody.jobId}`));
 }
 
-export function useAutoMelodies(selected: Song[], candidate: Song | null) {
+export function useAutoMelodies(selected: Song[]) {
   const [melodiesByTitle, setMelodiesByTitle] = useState(new Map<string, AutoMelody>());
   const [statuses, setStatuses] = useState(new Map<string, MelodyStatus>());
   const requested = useRef(new Set<string>());
   const wanted = useRef(new Set<string>());
 
   useEffect(() => {
-    const candidates = (candidate ? [candidate, ...selected] : selected).filter(song => song.source !== 'audio-upload');
+    const candidates = selected.filter(song => song.source !== 'audio-upload');
     wanted.current = new Set(candidates.map(song => melodyKey(song)));
     for (const song of candidates) {
       const key = melodyKey(song);
@@ -192,7 +367,7 @@ export function useAutoMelodies(selected: Song[], candidate: Song | null) {
         });
       });
     }
-  }, [selected, candidate, melodiesByTitle, statuses]);
+  }, [selected, melodiesByTitle, statuses]);
 
   const melodies = useMemo(() => Object.fromEntries(selected.flatMap(song => {
     const melody = melodiesByTitle.get(melodyKey(song));

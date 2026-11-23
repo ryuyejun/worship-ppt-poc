@@ -2,6 +2,9 @@
   "name": "worship-ppt-frontend",
   "private": true,
   "version": "1.0.0",
+  "engines": {
+    "node": ">=20.18.1 <27"
+  },
   "type": "module",
   "scripts": {
     "build": "tsc -b && vite build",
@@ -12,6 +15,8 @@
     "@spotify/basic-pitch": "^1.0.1",
     "@tensorflow/tfjs": "^3.21.0",
     "@tonejs/midi": "^2.0.28",
+    "@web-ppt/core": "^0.8.0",
+    "cheerio": "^1.2.0",
     "pptxgenjs": "^4.0.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

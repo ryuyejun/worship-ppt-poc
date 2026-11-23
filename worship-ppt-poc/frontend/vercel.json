@@ -1,0 +1,39 @@
+{
+  "version": 2,
+  "framework": "vite",
+  "buildCommand": "npm run build",
+  "installCommand": "npm ci",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/melody.js": { "maxDuration": 60 }
+  },
+  "rewrites": [
+    { "source": "/api/auto-melody/jobs", "destination": "/api/melody?path=jobs" },
+    { "source": "/api/auto-melody/source", "destination": "/api/melody?path=source" },
+    { "source": "/api/audio-lyrics", "destination": "https://yebit-web-test.yjryu.workers.dev/api/audio-lyrics" },
+    { "source": "/api/lyrics-extraction/:path*", "destination": "https://yebit-web-test.yjryu.workers.dev/api/lyrics-extraction/:path*" },
+    { "source": "/api/midi/:path*", "destination": "https://yebit-web-test.yjryu.workers.dev/api/midi/:path*" },
+    { "source": "/auth/me", "destination": "/api/proxy?path=/auth/me" },
+    { "source": "/auth/signup", "destination": "/api/proxy?path=/auth/signup" },
+    { "source": "/auth/login", "destination": "/api/proxy?path=/auth/login" },
+    { "source": "/auth/refresh", "destination": "/api/proxy?path=/auth/refresh" },
+    { "source": "/auth/logout", "destination": "/api/proxy?path=/auth/logout" },
+    { "source": "/lyrics", "destination": "https://yebit-web-test.yjryu.workers.dev/lyrics" },
+    { "source": "/search", "destination": "https://yebit-web-test.yjryu.workers.dev/search" },
+    { "source": "/providers", "destination": "https://yebit-web-test.yjryu.workers.dev/providers" },
+    { "source": "/songs", "destination": "https://yebit-web-test.yjryu.workers.dev/songs" },
+    { "source": "/song", "destination": "https://yebit-web-test.yjryu.workers.dev/song" },
+    { "source": "/song-lyrics", "destination": "https://yebit-web-test.yjryu.workers.dev/song-lyrics" },
+    { "source": "/ppt-songs", "destination": "https://yebit-web-test.yjryu.workers.dev/ppt-songs" },
+    { "source": "/requests/:path*", "destination": "https://yebit-web-test.yjryu.workers.dev/requests/:path*" },
+    { "source": "/requests", "destination": "https://yebit-web-test.yjryu.workers.dev/requests" },
+    { "source": "/ppt/:path*", "destination": "https://yebit-web-test.yjryu.workers.dev/ppt/:path*" },
+    { "source": "/ppt", "destination": "https://yebit-web-test.yjryu.workers.dev/ppt" },
+    { "source": "/batch-import", "destination": "https://yebit-web-test.yjryu.workers.dev/batch-import" },
+    { "source": "/youtube-videos", "destination": "https://yebit-web-test.yjryu.workers.dev/youtube-videos" },
+    { "source": "/youtube-thumbnail/:path*", "destination": "https://yebit-web-test.yjryu.workers.dev/youtube-thumbnail/:path*" },
+    { "source": "/youtube-playlist/:path*", "destination": "https://yebit-web-test.yjryu.workers.dev/youtube-playlist/:path*" },
+    { "source": "/song-artwork/:path*", "destination": "https://yebit-web-test.yjryu.workers.dev/song-artwork/:path*" },
+    { "source": "/local-token.js", "destination": "https://yebit-web-test.yjryu.workers.dev/local-token.js" }
+  ]
+}
