@@ -250,7 +250,7 @@ async function findPresentation(title, artist) {
       || Number(b.priority[2]) - Number(a.priority[2]);
   });
   for (const item of all) {
-    return { sourcePage: item.page, sourceFileUrl: item.url };
+    return { sourcePage: item.page, sourceFileUrl: item.url, sourceFileType: item.extension };
   }
   throw new Error('검색한 자료원에서 곡 제목이 일치하는 악보 파일을 찾지 못했습니다.');
 }
@@ -260,9 +260,10 @@ async function submitSearch(req, res, incoming) {
   const artist = (incoming.searchParams.get('artist') || '').trim().slice(0, 120);
   if (!title) return sendJson(res, 400, '곡 제목을 입력해 주세요.');
   try {
-    const { sourcePage, sourceFileUrl } = await findPresentation(title, artist);
+    const { sourcePage, sourceFileUrl, sourceFileType } = await findPresentation(title, artist);
     const fileUrl = new URL('/api/auto-melody/source', incoming);
     fileUrl.searchParams.set('url', sourceFileUrl);
+    fileUrl.searchParams.set('type', sourceFileType);
     const score = {
       title, sourceType: 'sheet-image', sourcePage, sourceFileUrl: fileUrl.pathname + fileUrl.search,
       bpm: 100, vocalStartSec: 0, vocalEndSec: 0, notes: [], reviewed: false,
@@ -276,33 +277,38 @@ async function submitSearch(req, res, incoming) {
   }
 }
 
-function allowedFileUrl(value) {
+function allowedFileUrl(value, type) {
   const url = safePageUrl(value, FILE_HOSTS);
   if (!url) return null;
   if (url.hostname === NAVER_ATTACHMENT_HOST && !url.pathname.startsWith('/open/')) return null;
   let pathname;
   try { pathname = decodeURIComponent(url.pathname); } catch { return null; }
-  if (!/\.pptx?$/i.test(pathname)) return null;
-  return url;
+  const pathType = pathname.match(/\.(pptx?)$/i)?.[1]?.toLowerCase();
+  const declaredType = String(type || '').toLowerCase();
+  if (pathType && pathType !== declaredType) return null;
+  if (!pathType && !['ppt', 'pptx'].includes(declaredType)) return null;
+  return { url, type: pathType || declaredType };
 }
 
 async function servePresentation(req, res, incoming) {
-  const fileUrl = allowedFileUrl(incoming.searchParams.get('url') || '');
-  if (!fileUrl) return sendJson(res, 400, '지원하지 않는 악보 파일 주소입니다.');
+  const file = allowedFileUrl(incoming.searchParams.get('url') || '', incoming.searchParams.get('type'));
+  if (!file) return sendJson(res, 400, '지원하지 않는 악보 파일 주소입니다.');
   const requested = req.headers.range || '';
   const range = requested.match(/^bytes=(\d+)-(\d+)$/);
   if (requested && (!range || Number(range[2]) < Number(range[1]) || Number(range[2]) - Number(range[1]) + 1 > MAX_RANGE_BYTES)) {
     return sendJson(res, 416, '악보 파일 범위가 올바르지 않습니다.');
   }
   try {
-    const upstream = await fetch(fileUrl, {
+    const upstream = await fetch(file.url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; YebitScoreSearch/1.0)', ...(requested ? { Range: requested } : {}) },
       redirect: 'manual',
       signal: AbortSignal.timeout(30_000),
     });
     if (!upstream.ok) return sendJson(res, upstream.status, '원본 악보 파일을 다운로드하지 못했습니다.');
     const totalHeader = upstream.headers.get('content-range')?.match(/\/([0-9]+)$/)?.[1];
-    const contentType = upstream.headers.get('content-type') || 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    const contentType = upstream.headers.get('content-type') || (file.type === 'ppt'
+      ? 'application/vnd.ms-powerpoint'
+      : 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
     const cacheControl = 'private, max-age=300';
     if (range) {
       const start = Number(range[1]);
