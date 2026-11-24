@@ -19,6 +19,7 @@ const DONGTAN_HOST = 'dongtanms.kr';
 const DONGTAN_LIST_PAGES = 3;
 const FILE_HOSTS = new Set(['ccmhymn.github.io', 'blog.kakaocdn.net', 't1.daumcdn.net', 'download.blog.naver.com', DONGTAN_HOST]);
 const NAVER_HOST = 'm.blog.naver.com';
+const NAVER_SEARCH_HOST = 'search.naver.com';
 const NAVER_ATTACHMENT_HOST = 'download.blog.naver.com';
 const NAVER_BLOG_ID = 'hyunakk';
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
@@ -107,9 +108,12 @@ function matchesTitle(title, label) {
 }
 
 function naverPostMatchesTitle(title, label) {
+  const normalizedTitle = normalize(title);
+  const normalizedLabel = normalize(label);
+  if (normalizedTitle.length >= 3 && normalizedLabel.includes(normalizedTitle)) return true;
   const suffix = String(label || '').match(/\s*(?:[/|]\s*|\s+)(?:악보|ppt|가사)\b/i);
   const songTitle = suffix ? String(label).slice(0, suffix.index) : String(label || '');
-  return normalize(songTitle) === normalize(title);
+  return normalize(songTitle) === normalizedTitle;
 }
 
 function safePageUrl(value, allowedHosts) {
@@ -168,6 +172,33 @@ async function naverCandidates(title) {
       found.set(`${site}/${NAVER_BLOG_ID}/${postId}`, /ppt/i.test(label));
     });
     return [...found].sort((a, b) => Number(b[1]) - Number(a[1])).slice(0, 3).map(([url]) => url);
+  } catch {
+    return [];
+  }
+}
+
+async function naverSearchCandidates(title) {
+  const query = new URLSearchParams({ where: 'blog', query: `${title} 악보 PPT` });
+  const site = `https://${NAVER_SEARCH_HOST}`;
+  try {
+    const { $ } = await fetchHtml(`${site}/search.naver?${query}`, new Set([NAVER_SEARCH_HOST]));
+    const found = new Map();
+    $('a[href*="blog.naver.com"]').each((_, element) => {
+      const anchor = $(element);
+      let parsed;
+      try { parsed = new URL(anchor.attr('href')); } catch { return; }
+      if (!['blog.naver.com', NAVER_HOST].includes(parsed.hostname)) return;
+      const path = parsed.pathname.split('/').filter(Boolean);
+      const blogId = parsed.searchParams.get('blogId') || path[0] || '';
+      const postId = parsed.searchParams.get('logNo') || path[1] || '';
+      const label = anchor.text().trim().replace(/\s+/g, ' ').slice(0, 1200);
+      if (!/^[a-z0-9_-]{2,40}$/i.test(blogId) || !/^\d{5,20}$/.test(postId)) return;
+      if (!naverPostMatchesTitle(title, label)) return;
+      const url = `https://${NAVER_HOST}/${blogId}/${postId}`;
+      found.set(url, [Number(/\bppt\b|피피티|악보/i.test(label)), normalize(label) === normalize(title)]);
+    });
+    return [...found].sort((a, b) => Number(b[1][0]) - Number(a[1][0]) || Number(b[1][1]) - Number(a[1][1]))
+      .slice(0, 8).map(([url]) => url);
   } catch {
     return [];
   }
@@ -234,11 +265,12 @@ async function findCandidates(title) {
   const target = normalize(title);
   if (target.length < 2) throw new Error('악보를 찾으려면 곡 제목을 입력해 주세요.');
   const results = await Promise.all([
+    naverSearchCandidates(title),
     naverCandidates(title),
     dongtanCandidates(title),
     ...SCORE_SITES.map(host => siteCandidates(host, title)),
   ]);
-  return [0, 1, 2].flatMap(index => results.flatMap(items => items[index] ? [items[index]] : []));
+  return [...new Set(results.flat())];
 }
 
 function attachmentLinks($, article, page, title) {
@@ -290,18 +322,18 @@ function embeddedScoreImages($, article, page, title) {
 
 async function findPresentation(title, artist) {
   const pages = await findCandidates(title);
-  const pageHosts = new Set([...SCORE_SITES, NAVER_HOST, DONGTAN_HOST]);
+  const pageHosts = new Set([...SCORE_SITES, NAVER_HOST, 'blog.naver.com', DONGTAN_HOST]);
   const articles = await Promise.all(pages.slice(0, 36).map(async page => {
     try {
       const { $ } = await fetchHtml(page, pageHosts);
       const metaTitle = $('meta[property="og:title"]').attr('content');
       const heading = $('h1,h2.title,.title_view,.tit_post').first().text();
       const label = metaTitle || heading;
-      const naver = new URL(page).hostname === NAVER_HOST;
+      const naver = ['blog.naver.com', NAVER_HOST].includes(new URL(page).hostname);
       const dongtan = new URL(page).hostname === DONGTAN_HOST;
       if (naver ? !naverPostMatchesTitle(title, label) : !matchesTitle(title, label)) return null;
       const article = naver
-        ? $('.files').first()
+        ? $('.se-main-container, .se_component_wrap, .files').first()
         : dongtan
           ? $('.xe_content').first()
           : $('.tt_article_useless_p_margin,.contents_style').first();
