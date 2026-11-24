@@ -482,9 +482,6 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
   .editor-ppt-candidate { margin:14px 12px 0; border:1px solid var(--app-line); border-radius:12px; padding:14px; box-shadow:0 4px 14px rgba(17,30,43,.06); }
   .editor-ppt-candidate__header { align-items:stretch; flex-direction:column; gap:12px; }
   .editor-ppt-candidate__header > strong { overflow-wrap:anywhere; font-size:16px; line-height:1.45; }
-  .editor-ppt-candidate__actions { width:100%; flex-wrap:nowrap; }
-  .editor-ppt-candidate__actions > button { min-height:42px; }
-  .editor-ppt-candidate__actions > .btn { flex:1; }
   .editor-melody-status,.editor-ppt-notice { margin:12px 12px 0; border-radius:10px; padding:10px 12px; }
   .editor-stage { min-height:385px; margin:14px 12px 0; border-radius:12px; padding:12px; }
   .editor-page-stack { gap:20px; }
@@ -711,14 +708,11 @@ html[data-theme="dark"] .editor-filmstrip { background:#222224; }
   background: #f5f6f8;
   color: #172739;
 }
-.editor-ppt-candidate__header,
-.editor-ppt-candidate__actions {
+.editor-ppt-candidate__header {
   display: flex;
   align-items: center;
   gap: 12px;
 }
-.editor-ppt-candidate__header { justify-content: space-between; }
-.editor-ppt-candidate__actions { justify-content: center; flex-wrap: wrap; }
 
 /* Always-visible appearance toggle */
 .editor-toolbar-account .editor-theme-toggle { position:relative; display:grid; width:38px; height:38px; flex:0 0 38px; place-items:center; border:1px solid var(--app-line); border-radius:50%; background:var(--app-card); padding:0; color:var(--app-ink); cursor:pointer; transition:background-color 460ms cubic-bezier(.22,.75,.25,1), color 460ms cubic-bezier(.22,.75,.25,1), border-color 460ms cubic-bezier(.22,.75,.25,1), transform 180ms ease, box-shadow 180ms ease; }

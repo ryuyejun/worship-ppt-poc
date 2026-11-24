@@ -307,9 +307,6 @@ export function WorshipApp() {
   const statusSong = selected.find(song =>
     recentTitleKey(song.title) === scoreNavigationPending.current && melodyStatusFor(song)
   ) ?? scoreControlSong;
-  const candidateAdded = activeSong && selected.some(song =>
-    song.id === activeSong.id || recentTitleKey(song.title) === recentTitleKey(activeSong.title)
-  );
   const melodyStatus = statusSong ? melodyStatusFor(statusSong) : undefined;
   useEffect(() => {
     if (authStatus !== 'authenticated') return;
@@ -1138,11 +1135,6 @@ export function WorshipApp() {
             {activeSong && <section className="editor-ppt-candidate" aria-label="선택한 곡">
               <div className="editor-ppt-candidate__header">
                 <strong>{activeSong.title}</strong>
-                <div className="editor-ppt-candidate__actions">
-                  <button type="button" className="btn btn--primary" disabled={Boolean(candidateAdded) || selected.length >= 100} onClick={() => addOriginalPpt(activeSong)}>
-                    {candidateAdded ? '목록에 추가됨' : '곡 목록에 추가'}
-                  </button>
-                </div>
               </div>
             </section>}
             {statusSong && melodyStatus && <div className="editor-melody-status" role="status">
