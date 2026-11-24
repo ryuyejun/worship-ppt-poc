@@ -236,7 +236,6 @@ footer.app-footer.closing { height: auto; min-height: 0; padding: 18px 40px 20px
 .app-nav .nav__bar { max-width: none; padding-inline: 24px; }
 .editor-page { --editor-sidebar-width: 231px; display: grid; grid-template-columns: var(--editor-sidebar-width) minmax(0, 1fr); position: relative; width: 100%; height: 100dvh; min-height: 560px; overflow: hidden; background: #e7e7e7; }
 .editor-mobile-nav { display:none; }
-.editor-mobile-song-context { display:none; }
 .editor-page > .editor-workspace { grid-column: 2; grid-row: 1; }
 .editor-sidebar { position: relative; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; background: rgba(255,255,255,.7); -webkit-backdrop-filter: blur(10px) saturate(140%); backdrop-filter: blur(10px) saturate(140%); }
 .editor-sidebar { z-index: 2; }
@@ -319,6 +318,8 @@ footer.app-footer.closing { height: auto; min-height: 0; padding: 18px 40px 20px
 .recent-song-section { display: grid; align-content: start; gap: 10px; }
 .recent-song-list { display: grid; gap: 10px; }
 .recent-song-card-shell { position: relative; min-width: 0; }
+.recent-song-favorite { position: absolute; z-index: 2; top: 10px; right: 46px; width: 28px; height: 28px; border-radius: 50%; background: rgba(255,255,255,.9); color: #5f6870; font-size: 18px; box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+.recent-song-favorite:hover, .recent-song-favorite.is-favorite { color: #1684bd; }
 .recent-song-delete { position: absolute; z-index: 2; top: 10px; right: 10px; display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 50%; background: rgba(20,29,43,.78); color: #fff; font-size: 20px; line-height: 1; opacity: 0; pointer-events: none; cursor: pointer; transition: opacity .15s ease; }
 .recent-song-card-shell:hover .recent-song-delete, .recent-song-card-shell:focus-within .recent-song-delete { opacity: 1; pointer-events: auto; }
 .recent-song-delete:focus-visible { outline: 2px solid #2383bb; outline-offset: 2px; }
@@ -476,12 +477,6 @@ main.editor-page > section.editor-workspace { position: relative; z-index: 1; di
   .editor-toolbar-account .editor-toolbar-export::after { content: 'PPTX'; font-size: 10px; }
   .editor-toolbar-account .editor-account-trigger { width: 30px; max-width: 30px; justify-content: center; padding-inline: 0; }
   .editor-toolbar-account .editor-account-trigger > span:first-child { display: none; }
-  .editor-mobile-song-context { display:grid; gap:4px; margin:14px 12px 0; border:1px solid var(--app-line); border-radius:12px; background:var(--app-card); padding:11px 14px; color:var(--app-ink); }
-  .editor-mobile-song-context > span { color:var(--app-muted); font-size:11px; }
-  .editor-mobile-song-context > strong { overflow-wrap:anywhere; font-size:15px; font-weight:600; line-height:1.4; }
-  .editor-ppt-candidate { margin:14px 12px 0; border:1px solid var(--app-line); border-radius:12px; padding:14px; box-shadow:0 4px 14px rgba(17,30,43,.06); }
-  .editor-ppt-candidate__header { align-items:stretch; flex-direction:column; gap:12px; }
-  .editor-ppt-candidate__header > strong { overflow-wrap:anywhere; font-size:16px; line-height:1.45; }
   .editor-melody-status,.editor-ppt-notice { margin:12px 12px 0; border-radius:10px; padding:10px 12px; }
   .editor-stage { min-height:385px; margin:14px 12px 0; border-radius:12px; padding:12px; }
   .editor-page-stack { gap:20px; }
@@ -702,17 +697,6 @@ html[data-theme="dark"] .editor-filmstrip { background:#222224; }
 .score-edit-notes { margin-bottom: 12px; }
 .score-edit-notes button { touch-action: none; }
 .score-edit-notes button[aria-pressed="true"] { background: #16233b; color: white; }
-
-.editor-ppt-candidate {
-  padding: 14px clamp(12px, 4vw, 42px);
-  background: #f5f6f8;
-  color: #172739;
-}
-.editor-ppt-candidate__header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
 
 /* Always-visible appearance toggle */
 .editor-toolbar-account .editor-theme-toggle { position:relative; display:grid; width:38px; height:38px; flex:0 0 38px; place-items:center; border:1px solid var(--app-line); border-radius:50%; background:var(--app-card); padding:0; color:var(--app-ink); cursor:pointer; transition:background-color 460ms cubic-bezier(.22,.75,.25,1), color 460ms cubic-bezier(.22,.75,.25,1), border-color 460ms cubic-bezier(.22,.75,.25,1), transform 180ms ease, box-shadow 180ms ease; }

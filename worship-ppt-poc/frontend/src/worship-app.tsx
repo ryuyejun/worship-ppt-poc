@@ -217,7 +217,6 @@ export function WorshipApp() {
   const [libraryQuery, setLibraryQuery] = useState('');
   const [results, setResults] = useState<Song[]>([]);
   const [selected, setSelected] = useState<SelectedSong[]>([]);
-  const [activeSong, setActiveSong] = useState<Song | null>(null);
   const [searchNotice, setSearchNotice] = useState<Notice>(null);
   const [pptNotice, setPptNotice] = useState<Notice>(null);
   const [creating, setCreating] = useState(false);
@@ -299,11 +298,20 @@ export function WorshipApp() {
   const [previewRetry, setPreviewRetry] = useState(0);
   const displaySlideOrder = normalizeSlideOrder(slideOrder, prepared?.slides.length ?? preview?.slideCount ?? 0);
 
-  const favoriteSongs = allSongs.filter((song) => favoriteIds.includes(song.id));
+  const favoriteSongCandidates = [
+    ...readySongs,
+    ...allSongs,
+    ...recentSongs.filter((recent) => favoriteIds.includes(recent.id)).map((recent) =>
+      allSongs.find((song) => song.id === recent.id) ?? readySongs.find((song) => song.id === recent.id)
+        ?? songFromTitle(recent.title, recent.id)),
+  ];
+  const favoriteSongs = [...new Map(favoriteSongCandidates
+    .filter((song) => favoriteIds.includes(song.id))
+    .map((song) => [song.id, song])).values()];
   const searchSuggestions = searchOpen ? liveSongSuggestions(query, [...readySongs, ...allSongs]) : [];
   const { melodies: autoMelodies, statusFor: melodyStatusFor, retry: retryMelody } = useAutoMelodies(selected);
   const previewSong = prepared?.slides[previewIndex]?.title;
-  const scoreControlSong = (previewSong ? selected.find((song) => recentTitleKey(song.title) === recentTitleKey(previewSong)) : undefined) ?? selected[0] ?? activeSong;
+  const scoreControlSong = (previewSong ? selected.find((song) => recentTitleKey(song.title) === recentTitleKey(previewSong)) : undefined) ?? selected[0];
   const statusSong = selected.find(song =>
     recentTitleKey(song.title) === scoreNavigationPending.current && melodyStatusFor(song)
   ) ?? scoreControlSong;
@@ -368,11 +376,16 @@ export function WorshipApp() {
     const existing = selected.find(item => item.id === song.id || recentTitleKey(item.title) === recentTitleKey(song.title));
     const videoId = trendingVideoId || song.youtubeVideoId || youtubeVideoIdFromUrl(song.source)
       || youtubeVideos.find(video => video.songId === song.id)?.videoId;
-    const chosen = existing ?? { ...song, youtubeVideoId: videoId };
-    setActiveSong(chosen);
-    setMobileEditorView('slides');
     setSearchOpen(false);
     setPptNotice(null);
+    if (!existing) {
+      addOriginalPpt({ ...song, youtubeVideoId: videoId });
+      return;
+    }
+    setMobileEditorView('slides');
+    changeEditorTab('songs');
+    const songSlideIndex = prepared?.slides.findIndex(slide => recentTitleKey(slide.title) === recentTitleKey(existing.title)) ?? -1;
+    if (songSlideIndex >= 0) setPreviewIndex(songSlideIndex);
   }
 
   function addSearchResult(song: Song) {
@@ -380,7 +393,6 @@ export function WorshipApp() {
     const videoId = song.youtubeVideoId || youtubeVideoIdFromUrl(song.source)
       || youtubeVideos.find(video => video.songId === song.id)?.videoId;
     setSearchOpen(false);
-    setActiveSong(null);
     if (existing) {
       changeEditorTab('songs');
       setMobileEditorView('slides');
@@ -402,7 +414,6 @@ export function WorshipApp() {
     retryMelody(song);
     setRemovedSlideIndexes([]); setSlideOrder([]);
     setSelected(items => [...items, { ...song, originalPpt: true }]);
-    setActiveSong(null);
     setMobileEditorView('slides');
     setPptNotice(null);
     changeEditorTab('songs');
@@ -425,7 +436,6 @@ export function WorshipApp() {
     const existing = selected.find(item => item.id === trendingSong.id
       || recentTitleKey(item.title) === recentTitleKey(trendingSong.title));
     if (existing) {
-      setActiveSong(null);
       setMobileEditorView('slides');
       changeEditorTab('songs');
       setPptNotice({ text: `${existing.title}은(는) 이미 제작 목록에 있습니다.`, kind: 'success' });
@@ -576,7 +586,7 @@ export function WorshipApp() {
     scoreNavigationPending.current = '';
     setPreviewIndex(scoreIndex);
     requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-slide-index="${scoreIndex}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
-  }, [prepared, activeSong]);
+  }, [prepared]);
 
   useEffect(() => {
     function syncPage() {
@@ -934,11 +944,6 @@ export function WorshipApp() {
         createPptShortcut.current();
         return;
       }
-      if (commandKey && !event.altKey && event.key === 'Enter' && activeSong) {
-        event.preventDefault();
-        addOriginalPpt(activeSong);
-        return;
-      }
       if (page === 'create' && prepared?.slides.length && (event.key === 'PageDown' || event.key === 'PageUp')) {
         event.preventDefault();
         const direction = event.key === 'PageDown' ? 1 : -1;
@@ -948,7 +953,7 @@ export function WorshipApp() {
 
     document.addEventListener('keydown', handleEditorShortcuts);
     return () => document.removeEventListener('keydown', handleEditorShortcuts);
-  }, [activeSong, selected, page, prepared]);
+  }, [selected, page, prepared]);
 
   async function importFiles(event: React.ChangeEvent<HTMLInputElement>) {
     const files = [...(event.target.files ?? [])];
@@ -1047,7 +1052,7 @@ export function WorshipApp() {
         <main className={`editor-page mobile-view-${mobileEditorView}`} id="create" onPointerDownCapture={(event) => { const target = event.target; if (target instanceof Element && target.closest('.editor-slide-text, .text-box-handle')) return; setSelectedTextSlide(null); }}>
           <nav className="editor-mobile-nav" aria-label="편집 화면">
             <button type="button" aria-pressed={mobileEditorView === 'songs'} onClick={() => setMobileEditorView('songs')}>곡 선택</button>
-            <button type="button" aria-pressed={mobileEditorView === 'slides'} onClick={() => setMobileEditorView('slides')} disabled={!activeSong && selected.length === 0}>PPT 미리보기</button>
+            <button type="button" aria-pressed={mobileEditorView === 'slides'} onClick={() => setMobileEditorView('slides')} disabled={selected.length === 0}>PPT 미리보기</button>
           </nav>
           <aside className="editor-sidebar" aria-label="찬양 곡 선택">
             <a className="editor-brand" href="#create" aria-label="Yebit 찬양 PPT 제작">
@@ -1110,7 +1115,18 @@ export function WorshipApp() {
             <div className="editor-controls">
               {editorTab === 'songs' ? <div className="editor-control-group">
                 {editorTab === 'songs' && recentSongs.length > 0 && <section className="recent-song-section" aria-label="최근 곡">
-                  <div className="recent-song-list">{recentSongs.slice(0, 5).map((recent) => { const videoId = recent.youtubeVideoId || youtubeVideos.find((video) => video.songId === recent.id)?.videoId; const imageUrl = youtubeThumbnailUrl(videoId); return <div className="recent-song-card-shell" key={`${recent.id}:${recent.title}`} role="button" tabIndex={0} aria-label={`${recent.title} 선택`} onClick={() => void openRecentSong(recent)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); void openRecentSong(recent); } }}><div className="recent-song-card">{imageUrl && <img className="recent-song-card__image" src={imageUrl} alt="" />}<span className="recent-song-card__glass"><span className="recent-song-card__title"><strong>{recent.title}</strong></span><span className="recent-song-card__meta"><small>최근 선택 · {new Date(recent.selectedAt).toLocaleDateString('ko-KR')}</small></span></span></div><button className="recent-song-delete" type="button" onClick={(event) => { event.stopPropagation(); setRecentSongs((songs) => songs.filter((song) => recentTitleKey(song.title) !== recentTitleKey(recent.title))); }} aria-label={`${recent.title} 최근 목록에서 삭제`}>×</button></div>; })}</div>
+                  <div className="recent-song-list">{recentSongs.slice(0, 5).map((recent) => {
+                    const videoId = recent.youtubeVideoId || youtubeVideos.find((video) => video.songId === recent.id)?.videoId;
+                    const imageUrl = youtubeThumbnailUrl(videoId);
+                    const song = allSongs.find(item => item.id === recent.id) ?? readySongs.find(item => item.id === recent.id)
+                      ?? songFromTitle(recent.title, recent.id);
+                    const isFavorite = favoriteIds.includes(recent.id);
+                    return <div className="recent-song-card-shell" key={`${recent.id}:${recent.title}`}>
+                      <button className="recent-song-card" type="button" onClick={() => void openRecentSong(recent)} aria-label={`${recent.title} 선택`}>{imageUrl && <img className="recent-song-card__image" src={imageUrl} alt="" />}<span className="recent-song-card__glass"><span className="recent-song-card__title"><strong>{recent.title}</strong></span><span className="recent-song-card__meta"><small>최근 선택 · {new Date(recent.selectedAt).toLocaleDateString('ko-KR')}</small></span></span></button>
+                      {recent.id > 0 && <button className={`favorite-toggle recent-song-favorite${isFavorite ? ' is-favorite' : ''}`} type="button" onClick={() => toggleFavorite(song)} aria-label={isFavorite ? `${recent.title} 즐겨찾기 해제` : `${recent.title} 즐겨찾기 추가`}>{isFavorite ? '★' : '☆'}</button>}
+                      <button className="recent-song-delete" type="button" onClick={(event) => { event.stopPropagation(); setRecentSongs((songs) => songs.filter((item) => recentTitleKey(item.title) !== recentTitleKey(recent.title))); }} aria-label={`${recent.title} 최근 목록에서 삭제`}>×</button>
+                    </div>;
+                  })}</div>
                 </section>}
                 {editorTab === 'songs' && selected.length > 0 && <section ref={selectedQueueRef} className="editor-selected-queue" aria-labelledby="editor-selected-title"><div className="editor-heading"><h2 id="editor-selected-title">제작 목록</h2><span>{selected.length}곡</span></div><ol className="selected-list">{selected.map((song, index) => <li key={song.id} data-song-id={song.id} draggable onDragStart={(event) => { draggedSongIdRef.current = song.id; originalSongOrderRef.current = selected.map((item) => item.id); setDraggedSongId(song.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', String(song.id)); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; reorderDraggedSong(song.id, event.clientY, event.currentTarget); }} onDrop={(event) => event.preventDefault()} onDragEnd={() => { if (originalSongOrderRef.current?.some((id, orderIndex) => selected[orderIndex]?.id !== id)) { setRemovedSlideIndexes([]); setSlideOrder([]); setSlidePositions({}); setSlideTextOverrides({}); setSlideTextColors({}); setEditingSlide(null); } draggedSongIdRef.current = null; originalSongOrderRef.current = null; setDraggedSongId(null); }} className={draggedSongId === song.id ? 'is-dragging' : ''} aria-roledescription="끌어서 순서 변경"><span className="selected-drag-handle" aria-hidden="true">⠿</span><span className="selected-index">{String(index + 1).padStart(2, '0')}</span><span className="selected-song"><strong>{song.title}</strong></span><div className="selected-actions"><button type="button" onClick={() => moveSong(index, -1)} disabled={index === 0} aria-label={`${song.title} 위로`}>↑</button><button type="button" onClick={() => moveSong(index, 1)} disabled={index === selected.length - 1} aria-label={`${song.title} 아래로`}>↓</button><button type="button" onClick={() => { setRemovedSlideIndexes([]); setSlideOrder([]); setSelected((items) => items.filter((item) => item.id !== song.id)); }} aria-label={`${song.title} 제거`}>×</button></div></li>)}</ol></section>}
               </div> : editorTab === 'favorites' ? <div className="editor-control-group">
@@ -1128,15 +1144,6 @@ export function WorshipApp() {
             <div className="editor-toolbar"><div className="editor-toolbar__left"><div className="editor-title-control" ref={titleControlRef}><svg className="editor-title-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round"/><path d="M13 14h5m-2-2 2 2-2 2" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>{titleEditOpen ? <input className="editor-document-title-input" aria-label="프레젠테이션 제목 편집" style={{width:`${Math.max(1, presentationTitle.length)}em`}} autoFocus value={presentationTitle} onChange={(event) => setPresentationTitle(event.target.value)} maxLength={80} onBlur={() => setTitleEditOpen(false)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === 'Escape') { event.preventDefault(); setTitleEditOpen(false); } }} /> : <button className="editor-document-title" type="button" aria-label="프레젠테이션 제목 수정" aria-expanded={titleEditOpen} onClick={() => setTitleEditOpen(true)}><span>{presentationTitle.trim() || '제목 없는 디자인'}</span></button>}</div><div className="editor-size-control" ref={sizeControlRef}><button className="editor-page-count" type="button" aria-label={`슬라이드 크기 ${slideSize.width} 곱하기 ${slideSize.height} 픽셀`} aria-expanded={sizeOpen} onClick={() => setSizeOpen((open) => !open)}><span>{slideSize.width}×{slideSize.height} px</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4.5 7.5 5.5 5 5.5-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button>{sizeOpen && <div className="editor-size-menu"><div className="editor-size-presets">{[{label:'16:9',width:1280,height:720},{label:'16:10',width:1280,height:800},{label:'4:3',width:1280,height:960},{label:'1:1',width:960,height:960}].map((preset) => <button type="button" key={preset.label} aria-pressed={slideSize.width===preset.width&&slideSize.height===preset.height} onClick={() => setSlideSize({width:preset.width,height:preset.height})}>{preset.label}</button>)}</div><div className="editor-size-custom"><label>가로<input type="number" min="320" max="3840" value={slideSize.width} onChange={(event) => setSlideSize((size) => ({...size,width:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label><span>×</span><label>세로<input type="number" min="320" max="3840" value={slideSize.height} onChange={(event) => setSlideSize((size) => ({...size,height:Math.max(320,Math.min(3840,Number(event.target.value)||320))}))}/></label></div></div>}</div></div>
             <div className="editor-toolbar-account"><button className="editor-toolbar-queue" type="button" onClick={() => { setEditorTab('songs'); window.requestAnimationFrame(() => selectedQueueRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })); }} aria-label={`제작 목록, ${selected.length}곡 · ${preview?.slideCount ?? 1}장`}>{selected.length}곡 · {preview?.slideCount ?? 1}장</button><button className="btn btn--primary editor-toolbar-export" type="button" onClick={createPpt} disabled={creating}>{creating ? '만드는 중…' : 'PPTX 다운로드'}</button><button className={darkMode ? 'editor-theme-toggle is-dark' : 'editor-theme-toggle'} type="button" aria-label={darkMode ? '라이트 모드로 전환' : '다크 모드로 전환'} aria-pressed={darkMode} title={darkMode ? '라이트 모드' : '다크 모드'} onClick={() => setDarkMode(mode => !mode)}>{darkMode ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 15.1A8.5 8.5 0 0 1 8.9 3.8 8.6 8.6 0 1 0 20.2 15.1Z" fill="currentColor"/></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.4" fill="currentColor"/><path d="M12 2v2.2M12 19.8V22M4.93 4.93l1.56 1.56m11.02 11.02 1.56 1.56M2 12h2.2m15.6 0H22M4.93 19.07l1.56-1.56M17.51 6.49l1.56-1.56" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/></svg>}</button><div className="editor-account-control" ref={accountMenuRef}><button className="editor-account-trigger" type="button" aria-haspopup="menu" aria-expanded={accountMenuOpen} onClick={() => setAccountMenuOpen(open => !open)}><span>{authUser?.email ?? '계정'}</span><span className="editor-account-chevron" aria-hidden="true">⌄</span></button>{accountMenuOpen && <div className="editor-account-menu" role="menu"><button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); setSettingsOpen(true); }}><span aria-hidden="true">⚙</span> 설정</button><button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); void signOut(); }}><span aria-hidden="true">↪</span> 로그아웃</button></div>}</div></div></div>
             {pptNotice && <p className={`editor-ppt-notice notice ${pptNotice.kind ?? ''}`} role="status" aria-live="polite">{pptNotice.text}</p>}
-            {!activeSong && scoreControlSong && <div className="editor-mobile-song-context" aria-label={`현재 선택한 곡 ${scoreControlSong.title}`}>
-              <span>선택한 곡</span>
-              <strong>{scoreControlSong.title}</strong>
-            </div>}
-            {activeSong && <section className="editor-ppt-candidate" aria-label="선택한 곡">
-              <div className="editor-ppt-candidate__header">
-                <strong>{activeSong.title}</strong>
-              </div>
-            </section>}
             {statusSong && melodyStatus && <div className="editor-melody-status" role="status">
               <span><strong>{statusSong.title}</strong> · {melodyStatus.message}</span>
               {melodyStatus.state === 'failed' && <button type="button" className="preview-retry" onClick={() => retryMelody(statusSong)}>악보 다시 시도</button>}
