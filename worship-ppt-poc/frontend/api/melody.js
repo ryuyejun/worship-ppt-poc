@@ -6,7 +6,14 @@ const SCORE_SITES = [
   'cwy0675.tistory.com', 'ccm4u.tistory.com', 'dariuskim.com', 'rialim.tistory.com',
   'peacecreator.tistory.com', 'venti600ml.tistory.com', 'anemoneya.tistory.com',
   'soil1228.tistory.com', 'colordiary.tistory.com', 'w-decrecendo.tistory.com',
-  'jinutus.tistory.com',
+  'jinutus.tistory.com', 'kisok125.tistory.com', 'jskyscore.tistory.com',
+  'jiniworship.tistory.com', 'otfreak.tistory.com', 'worshipnote.tistory.com',
+  'deobeluvd.tistory.com', 'nmcat.tistory.com', 'disital.tistory.com',
+  'peniel95.com', 'risen.runean.com', 'woori1716.tistory.com',
+  'yoolessonge.tistory.com', 'manimuyo.tistory.com', 'tae1147.tistory.com',
+  'akkbo.tistory.com', 'ggyu-ggyu.tistory.com', 'hannah0512.tistory.com',
+  'kristos.tistory.com', 's-chursh-m.tistory.com', 'echristian.tistory.com',
+  'minimanyddo.tistory.com', 'hielou7.tistory.com', 'jfan.tistory.com',
 ];
 const DONGTAN_HOST = 'dongtanms.kr';
 const DONGTAN_LIST_PAGES = 3;
@@ -242,23 +249,49 @@ function attachmentLinks($, article, page, title) {
     try { url = new URL(anchor.attr('href'), page); } catch { return; }
     const label = anchor.text().trim();
     let filename = decodeURIComponent(url.pathname.split('/').at(-1) || '');
-    const extension = (label.match(/\.(pptx?)(?:\s|$)/i) || filename.match(/\.(pptx?)$/i))?.[1]?.toLowerCase();
+    const extension = (label.match(/\.(pptx?|png|jpe?g|webp)(?:\s|$)/i)
+      || filename.match(/\.(pptx?|png|jpe?g|webp)$/i))?.[1]?.toLowerCase();
     if (!extension) return;
     if (url.protocol !== 'https:' || !FILE_HOSTS.has(url.hostname) || !url.pathname) return;
     if (url.hostname === NAVER_ATTACHMENT_HOST && (new URL(page).hostname !== NAVER_HOST || !url.pathname.startsWith('/open/'))) return;
     if (!matchesTitle(title, `${label} ${filename}`)) return;
     const description = `${label} ${filename}`.toLocaleLowerCase('ko-KR');
-    const priority = [!/(가사만|가사용|자막용)/.test(description), description.includes('악보'), /wide|와이드|16[:_-]9/.test(description)];
+    const priority = [!/(가사만|가사용|자막용)/.test(description), extension === 'ppt' || extension === 'pptx', description.includes('악보')];
     result.push({ url: url.href, extension, label, priority });
   });
   return result.sort((a, b) => Number(b.priority[0]) - Number(a.priority[0])
     || Number(b.priority[1]) - Number(a.priority[1]) || Number(b.priority[2]) - Number(a.priority[2]));
 }
 
+function embeddedScoreImages($, article, page, title) {
+  if (!/악보|score|sheet/i.test(`${title} ${article.text()}`)) return [];
+  const result = [];
+  article.find('img[src]').each((_, element) => {
+    const image = $(element);
+    let url;
+    try { url = new URL(image.attr('src'), page); } catch { return; }
+    if (!['blog.kakaocdn.net', 't1.daumcdn.net'].includes(url.hostname) || url.protocol !== 'https:') return;
+    let pathname;
+    try { pathname = decodeURIComponent(url.pathname); } catch { return; }
+    const extension = pathname.match(/\.(png|jpe?g|webp)$/i)?.[1]?.toLowerCase();
+    if (!extension || /\/thumb(?:nail)?\//i.test(pathname)) return;
+    const alt = image.attr('alt') || '';
+    const dimensions = [Number(image.attr('width')) || 0, Number(image.attr('height')) || 0];
+    if (/logo|profile|avatar|banner|icon|thumbnail/i.test(alt) || dimensions.some(value => value > 0 && value < 280)) return;
+    result.push({
+      url: url.href,
+      extension,
+      label: `${title} 악보 이미지 ${alt}`.trim(),
+      priority: [true, false, true],
+    });
+  });
+  return result;
+}
+
 async function findPresentation(title, artist) {
   const pages = await findCandidates(title);
   const pageHosts = new Set([...SCORE_SITES, NAVER_HOST, DONGTAN_HOST]);
-  const articles = await Promise.all(pages.map(async page => {
+  const articles = await Promise.all(pages.slice(0, 36).map(async page => {
     try {
       const { $ } = await fetchHtml(page, pageHosts);
       const metaTitle = $('meta[property="og:title"]').attr('content');
@@ -273,7 +306,7 @@ async function findPresentation(title, artist) {
           ? $('.xe_content').first()
           : $('.tt_article_useless_p_margin,.contents_style').first();
       if (!article.length) return null;
-      return { page, links: attachmentLinks($, article, page, title) };
+      return { page, links: [...attachmentLinks($, article, page, title), ...embeddedScoreImages($, article, page, title)] };
     } catch {
       return null;
     }
@@ -287,9 +320,10 @@ async function findPresentation(title, artist) {
       || Number(b.priority[1]) - Number(a.priority[1])
       || Number(b.priority[2]) - Number(a.priority[2]);
   });
-  for (const item of all) {
-    return { sourcePage: item.page, sourceFileUrl: item.url, sourceFileType: item.extension };
-  }
+  const unique = [...new Map(all.map(item => [`${item.page}|${item.url}`, item])).values()];
+  if (unique.length) return unique.slice(0, 4).map(item => ({
+    sourcePage: item.page, sourceFileUrl: item.url, sourceFileType: item.extension,
+  }));
   throw new Error('검색한 자료원에서 곡 제목이 일치하는 악보 파일을 찾지 못했습니다.');
 }
 
@@ -298,12 +332,20 @@ async function submitSearch(req, res, incoming) {
   const artist = (incoming.searchParams.get('artist') || '').trim().slice(0, 120);
   if (!title) return sendJson(res, 400, '곡 제목을 입력해 주세요.');
   try {
-    const { sourcePage, sourceFileUrl, sourceFileType } = await findPresentation(title, artist);
-    const fileUrl = new URL('/api/auto-melody/source', incoming);
-    fileUrl.searchParams.set('url', sourceFileUrl);
-    fileUrl.searchParams.set('type', sourceFileType);
+    const sources = await findPresentation(title, artist);
+    const proxiedSources = sources.map(source => {
+      const fileUrl = new URL('/api/melody', incoming);
+      fileUrl.searchParams.set('path', 'source');
+      fileUrl.searchParams.set('url', source.sourceFileUrl);
+      fileUrl.searchParams.set('type', source.sourceFileType);
+      return { ...source, sourceFileUrl: fileUrl.pathname + fileUrl.search };
+    });
+    const [firstSource, ...fallbackSources] = proxiedSources;
     const score = {
-      title, sourceType: 'sheet-image', sourcePage, sourceFileUrl: fileUrl.pathname + fileUrl.search,
+      title, sourceType: 'sheet-image', sourcePage: firstSource.sourcePage,
+      sourceFileUrl: firstSource.sourceFileUrl,
+      sourceFileType: firstSource.sourceFileType,
+      sourceAlternatives: fallbackSources,
       bpm: 100, vocalStartSec: 0, vocalEndSec: 0, notes: [], reviewed: false,
     };
     res.statusCode = 200;
@@ -321,10 +363,10 @@ function allowedFileUrl(value, type) {
   if (url.hostname === NAVER_ATTACHMENT_HOST && !url.pathname.startsWith('/open/')) return null;
   let pathname;
   try { pathname = decodeURIComponent(url.pathname); } catch { return null; }
-  const pathType = pathname.match(/\.(pptx?)$/i)?.[1]?.toLowerCase();
+  const pathType = pathname.match(/\.(pptx?|png|jpe?g|webp)$/i)?.[1]?.toLowerCase();
   const declaredType = String(type || '').toLowerCase();
   if (pathType && pathType !== declaredType) return null;
-  if (!pathType && !['ppt', 'pptx'].includes(declaredType)) return null;
+  if (!pathType && !['ppt', 'pptx', 'png', 'jpg', 'jpeg', 'webp'].includes(declaredType)) return null;
   return { url, type: pathType || declaredType };
 }
 
@@ -355,9 +397,12 @@ async function servePresentation(req, res, incoming) {
     }
     if (!upstream.ok) return sendJson(res, upstream.status, '원본 악보 파일을 다운로드하지 못했습니다.');
     const totalHeader = upstream.headers.get('content-range')?.match(/\/([0-9]+)$/)?.[1];
-    const contentType = upstream.headers.get('content-type') || (file.type === 'ppt'
-      ? 'application/vnd.ms-powerpoint'
-      : 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+    const fallbackTypes = {
+      ppt: 'application/vnd.ms-powerpoint',
+      pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp',
+    };
+    const contentType = upstream.headers.get('content-type') || fallbackTypes[file.type];
     const cacheControl = 'private, max-age=300';
     if (range) {
       const start = Number(range[1]);

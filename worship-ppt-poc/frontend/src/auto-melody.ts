@@ -6,6 +6,7 @@ export type AutoMelody = {
   sourceType?: string;
   sourcePage?: string;
   sourceFileUrl?: string;
+  sourceFileType?: string;
   sheetImages?: string[];
   sheetImageCount?: number;
   musicxmlUrl?: string;
@@ -30,6 +31,8 @@ type Job = {
     sourceType?: string;
     sourcePage?: string;
     sourceFileUrl?: string;
+    sourceFileType?: string;
+    sourceAlternatives?: Array<{ sourcePage: string; sourceFileUrl: string; sourceFileType: string }>;
     sheetImages?: string[];
     sheetImageCount?: number;
     musicxmlUrl?: string;
@@ -87,11 +90,16 @@ async function fetchPresentationFile(url: string) {
     headers: { Range: `bytes=0-${chunkSize - 1}` },
     signal: AbortSignal.timeout(30_000),
   });
-  if (!first.ok) throw new Error('원본 악보 PPT를 다운로드하지 못했습니다.');
+  if (!first.ok) {
+    const problem = await first.json().catch(() => null) as { error?: unknown } | null;
+    const message = problem?.error;
+    throw new Error(typeof message === 'string' ? message : '원본 악보 파일을 다운로드하지 못했습니다.');
+  }
+  const contentType = first.headers.get('content-type')?.split(';')[0].trim().toLowerCase() || 'application/octet-stream';
   if (first.status !== 206) {
     const blob = await first.blob();
     if (blob.size > 20 * 1024 * 1024) throw new Error('악보 PPT 파일이 너무 큽니다.');
-    return new Uint8Array(await blob.arrayBuffer());
+    return { bytes: new Uint8Array(await blob.arrayBuffer()), contentType };
   }
 
   const contentRange = first.headers.get('content-range')?.match(/^bytes 0-(\d+)\/(\d+)$/);
@@ -120,7 +128,7 @@ async function fetchPresentationFile(url: string) {
     }));
     for (const chunk of chunks) bytes.set(chunk.data, chunk.start);
   }
-  return bytes;
+  return { bytes, contentType };
 }
 
 async function imageFromBlob(blob: Blob) {
@@ -190,8 +198,26 @@ function containsStaff(canvas: HTMLCanvasElement) {
   return false;
 }
 
-async function renderPresentationFile(sourceUrl: string) {
-  const bytes = await fetchPresentationFile(sourceUrl);
+async function renderPresentationFile(sourceUrl: string, sourceFileType?: string) {
+  const { bytes, contentType } = await fetchPresentationFile(sourceUrl);
+  if (['png', 'jpg', 'jpeg', 'webp'].includes((sourceFileType || '').toLowerCase()) || contentType.startsWith('image/')) {
+    const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: contentType.startsWith('image/') ? contentType : `image/${sourceFileType === 'jpg' ? 'jpeg' : sourceFileType}` });
+    const image = await imageFromBlob(blob);
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      if (!context) throw new Error('악보 페이지를 표시할 수 없습니다.');
+      context.fillStyle = '#fff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      image.draw(context);
+      if (!containsStaff(canvas)) throw new Error('찾은 이미지에서 악보 오선을 확인하지 못했습니다.');
+      return [canvas.toDataURL('image/jpeg', 0.92)];
+    } finally {
+      image.dispose();
+    }
+  }
   try {
     const { parse, slideToPng } = await import('@web-ppt/core');
     const presentation = await parse(bytes);
@@ -233,7 +259,28 @@ async function readScore(title: string, job: Job): Promise<AutoMelody> {
   const payload = job.score;
   if ((!payload?.notes.length && !payload?.sheetImages?.length && !payload?.sheetImageCount && !payload?.sourceFileUrl) || !job.revision) throw new Error('악보 결과가 비어 있습니다.');
   let sheetImages = payload?.sheetImages;
-  if (!sheetImages && payload?.sourceFileUrl) sheetImages = await renderPresentationFile(payload.sourceFileUrl);
+  let sourcePage = payload?.sourcePage;
+  let sourceFileUrl = payload?.sourceFileUrl;
+  let sourceFileType = payload?.sourceFileType;
+  if (!sheetImages && payload?.sourceFileUrl) {
+    const sources: Array<{ sourcePage?: string; sourceFileUrl: string; sourceFileType?: string }> = [
+      { sourceFileUrl: payload.sourceFileUrl, sourceFileType: payload.sourceFileType },
+      ...(payload.sourceAlternatives || []),
+    ];
+    let lastError: unknown;
+    for (const source of sources) {
+      try {
+        sheetImages = await renderPresentationFile(source.sourceFileUrl, source.sourceFileType);
+        sourcePage = source.sourcePage ?? sourcePage;
+        sourceFileUrl = source.sourceFileUrl;
+        sourceFileType = source.sourceFileType;
+        break;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (!sheetImages && lastError instanceof Error) throw lastError;
+  }
   if (!sheetImages && payload?.sheetImageCount) {
     if (payload.sheetImageCount > 40) throw new Error('악보 PPT 페이지 수가 너무 많습니다.');
     sheetImages = [];
@@ -244,7 +291,9 @@ async function readScore(title: string, job: Job): Promise<AutoMelody> {
     }
   }
   return {
-    title, sheetImages, sourceType: payload.sourceType, sourcePage: payload.sourcePage, musicxmlUrl: payload.musicxmlUrl, jobId: job.jobId, revision: job.revision, reviewed: payload.reviewed,
+    title, sheetImages, sourceType: payload.sourceType,
+    sourcePage, sourceFileUrl, sourceFileType,
+    musicxmlUrl: payload.musicxmlUrl, jobId: job.jobId, revision: job.revision, reviewed: payload.reviewed,
     bpm: payload.bpm, key: payload.key, lyricsStart: payload.lyricsStart, videoId: payload.videoId,
     vocalStartSec: payload.vocalStartSec ?? 0, vocalEndSec: payload.vocalEndSec ?? 0,
     notes: payload.notes.map(note => ({
