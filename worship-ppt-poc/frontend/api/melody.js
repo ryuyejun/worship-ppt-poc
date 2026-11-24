@@ -258,7 +258,8 @@ async function dongtanCandidates(title) {
       return [];
     }
   }));
-  return [...new Set(results.flat())];
+  return [...new Set(Array.from({ length: 9 }, (_, index) => index)
+    .flatMap(index => results.flatMap(items => items[index] ? [items[index]] : [])))];
 }
 
 async function findCandidates(title) {
@@ -323,7 +324,7 @@ function embeddedScoreImages($, article, page, title) {
 async function findPresentation(title, artist) {
   const pages = await findCandidates(title);
   const pageHosts = new Set([...SCORE_SITES, NAVER_HOST, 'blog.naver.com', DONGTAN_HOST]);
-  const articles = await Promise.all(pages.slice(0, 36).map(async page => {
+  const articles = await Promise.all(pages.slice(0, 48).map(async page => {
     try {
       const { $ } = await fetchHtml(page, pageHosts);
       const metaTitle = $('meta[property="og:title"]').attr('content');
