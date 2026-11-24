@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MelodyNote } from './score';
+import { preparePptxTransparency } from './pptx-transparency';
 
 export type AutoMelody = {
   title: string;
@@ -220,7 +221,8 @@ async function renderPresentationFile(sourceUrl: string, sourceFileType?: string
   }
   try {
     const { parse, slideToPng } = await import('@web-ppt/core');
-    const presentation = await parse(bytes);
+    const renderableBytes = await preparePptxTransparency(bytes);
+    const presentation = await parse(renderableBytes);
     try {
       if (!presentation.slides.length || presentation.slides.length > 40) throw new Error('악보 PPT의 페이지 수를 지원하지 않습니다.');
       const canvas = document.createElement('canvas');
