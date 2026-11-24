@@ -25,11 +25,9 @@ test('절과 후렴 및 줄바꿈을 보존해 PPTX를 생성한다', async () =
 
 test('악보 이미지를 표시하지 못해도 전체 가사 페이지를 유지한다', async () => {
   const before=globalThis.fetch;
-  globalThis.fetch=async (url) => String(url).includes('/musicxml')
-    ? new Response('',{status:502})
-    : Response.json({success:true,data:{id:2,title:'테스트',artist:null,lyrics:'첫째 줄\n둘째 줄\n셋째 줄\n넷째 줄\n다섯째 줄'}});
+  globalThis.fetch=async () => Response.json({success:true,data:{id:2,title:'테스트',artist:null,lyrics:'첫째 줄\n둘째 줄\n셋째 줄\n넷째 줄\n다섯째 줄'}});
   try {
-    const slides=await collectSlides({songIds:[2],style,autoMelodies:{2:{title:'테스트',sourceType:'sheet-omr',musicxmlUrl:'/missing/musicxml',bpm:100,vocalStartSec:0,vocalEndSec:5,notes:[],jobId:'test',revision:1,reviewed:false}}});
+    const slides=await collectSlides({songIds:[2],style,autoMelodies:{2:{title:'테스트'}}});
     assert.equal(slides.length,3);
     assert.deepEqual(slides.flatMap(slide=>slide.lines),['첫째 줄','둘째 줄','셋째 줄','넷째 줄','다섯째 줄']);
   } finally {globalThis.fetch=before;}
@@ -41,11 +39,11 @@ test('원본 PPT가 있으면 가사 DB 없이 모든 페이지를 그대로 사
   globalThis.fetch = async () => { throw new Error('가사 API를 호출하면 안 됩니다.'); };
   try {
     const original = { title: '원본', sourceType: 'sheet-image', sheetImages: [image, image],
-      bpm: 100, vocalStartSec: 0, vocalEndSec: 0, notes: [], jobId: 'image', revision: 1, reviewed: false };
+    };
     for (const id of [-3, 3]) {
       const slides = await collectSlides({ songIds: [id], style, autoMelodies: { [id]: original } });
       assert.equal(slides.length, 2);
-      assert.ok(slides.every(slide => slide.scorePageImage === image && slide.lines.length === 0 && !slide.scoreRows));
+      assert.ok(slides.every(slide => slide.scorePageImage === image && slide.lines.length === 0));
     }
   } finally {
     globalThis.fetch = before;

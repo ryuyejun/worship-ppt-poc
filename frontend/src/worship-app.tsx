@@ -1,12 +1,11 @@
 import { useAutoMelodies, type AutoMelody } from './auto-melody';
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import type { ScoreSlide } from './score';
 import { api, cloudflareMode } from './api';
 import type { ApiResponse, Song, SongRequest } from './types';
 import { collectSlides, normalizeSlideOrder, renderSlide, type Slide, type SlideSize, type SlideStyle, type SlideTextPosition } from './presentation';
 
 type Notice = { text: string; kind?: 'error' | 'success' } | null;
-type RecentSong = { id: number; title: string; artist: string | null; selectedAt: number; lyrics?: string; lyricsFilteredByVocalBounds?: boolean; lyricsFromAudio?: boolean; captionFormatVersion?: number; source?: string | null; youtubeVideoId?: string; youtubePlaylistId?: string; artworkUrl?: string; artworkSourceUrl?: string; artworkContributor?: string };
+type RecentSong = { id: number; title: string; artist: string | null; selectedAt: number; source?: string | null; youtubeVideoId?: string; artworkUrl?: string; artworkSourceUrl?: string; artworkContributor?: string };
 type SelectedSong = Song & { originalPpt?: boolean };
 type FavoriteArtwork = { imageUrl: string; sourceUrl?: string; contributor?: string };
 type PptStyle = {
@@ -114,20 +113,6 @@ function displayKnown(value?: string | null) {
   return /^(미확인|미확인한 곡|정보 없음|unknown)$/i.test(text) ? '' : text;
 }
 
-function ScoreRowsOverlay({ rows, fontFamily, fontSize, color, bold, onSelect }: {
-  rows: ScoreSlide['rows']; fontFamily: string; fontSize: number; color: string; bold: boolean; onSelect?: () => void;
-}) {
-  return <div className="editor-score-overlay" role={onSelect ? 'button' : undefined}
-    tabIndex={onSelect ? 0 : undefined} aria-label={onSelect ? '가사 텍스트 선택' : undefined}
-    style={onSelect ? { pointerEvents: 'auto' } : undefined}
-    onClick={onSelect} onKeyDown={event => {
-      if (onSelect && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onSelect(); }
-    }}>{rows.map((row, index) => <div className="editor-score-overlay__row" key={index}>
-    {row.staff && <img src={row.staff} alt="오선 악보" />}
-    <span style={{ fontFamily, fontSize: `${fontSize / 960 * 100}cqw`, color, fontWeight: bold ? 700 : 500 }}>{row.lyrics}</span>
-  </div>)}</div>;
-}
-
 async function authRequest<T>(path: string, method: 'GET' | 'POST', body?: unknown): Promise<T> {
   const response = await fetch(path, {
     method,
@@ -224,8 +209,6 @@ export function WorshipApp() {
   const [requests, setRequests] = useState<SongRequest[]>([]);
   const [requestQuery, setRequestQuery] = useState('');
   const [requestNotice, setRequestNotice] = useState<Notice>(null);
-  const [importNotice, setImportNotice] = useState<Notice>(null);
-  const [importing, setImporting] = useState(false);
   const pptStyle = defaultPptStyle;
   const [libraryError, setLibraryError] = useState('');
   const [editorTab, setEditorTab] = useState<'songs' | 'favorites' | 'trending'>('songs');
@@ -581,7 +564,7 @@ export function WorshipApp() {
   useEffect(() => {
     const target = scoreNavigationPending.current;
     if (!target || !prepared) return;
-    const scoreIndex = prepared.slides.findIndex((slide) => (slide.scorePageImage || slide.scoreRows?.length) && recentTitleKey(slide.title) === target);
+    const scoreIndex = prepared.slides.findIndex((slide) => slide.scorePageImage && recentTitleKey(slide.title) === target);
     if (scoreIndex < 0) return;
     scoreNavigationPending.current = '';
     setPreviewIndex(scoreIndex);
@@ -955,46 +938,6 @@ export function WorshipApp() {
     return () => document.removeEventListener('keydown', handleEditorShortcuts);
   }, [selected, page, prepared]);
 
-  async function importFiles(event: React.ChangeEvent<HTMLInputElement>) {
-    const files = [...(event.target.files ?? [])];
-    if (!files.length) return;
-    if (files.length > 50 || files.reduce((size, file) => size + file.size, 0) > 8_000_000) {
-      setImportNotice({ text: '파일은 최대 50개, 전체 용량은 8MB까지 선택할 수 있습니다.', kind: 'error' });
-      return;
-    }
-    setImporting(true);
-    setImportNotice({ text: '가사 파일을 확인하고 있습니다.' });
-    try {
-      const entries = await Promise.all(files.map(async (file) => ({
-        name: file.name,
-        data: await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onerror = () => reject(new Error(`${file.name} 파일을 읽지 못했습니다.`));
-          reader.onload = () => resolve(String(reader.result).split(',')[1]);
-          reader.readAsDataURL(file);
-        }),
-      })));
-      const result = await api<{ saved: number; skipped: number }>('/batch-import', { files: entries });
-      setImportNotice({ text: `가사 ${result.data.saved}곡을 저장했고 ${result.data.skipped}건은 건너뛰었습니다.`, kind: 'success' });
-      await loadSongs();
-    } catch (error) {
-      setImportNotice({ text: error instanceof Error ? error.message : '파일 가져오기에 실패했습니다.', kind: 'error' });
-    } finally {
-      setImporting(false);
-      event.target.value = '';
-    }
-  }
-
-  async function completeRequest(request: SongRequest, songId: number) {
-    try {
-      await api('/requests/complete', { id: request.id, songId });
-      setRequestNotice({ text: '곡 요청을 완료 처리했습니다.', kind: 'success' });
-      await loadRequests();
-    } catch (error) {
-      setRequestNotice({ text: error instanceof Error ? error.message : '요청을 완료하지 못했습니다.', kind: 'error' });
-    }
-  }
-
   if (authStatus !== 'authenticated') {
     return <main className="auth-screen">
       <section className={`auth-card${authMode === 'signup' ? ' is-signup' : ''}`} aria-label="Yebit 계정">
@@ -1150,7 +1093,7 @@ export function WorshipApp() {
             </div>}
             <div className="editor-stage">
               {previewError ? <div className="editor-canvas-message"><strong>미리보기를 열 수 없습니다</strong><span>{previewError}</span><button type="button" className="preview-retry" onClick={() => setPreviewRetry((value) => value + 1)}>다시 시도</button></div> : previewLoading && !prepared ? <div className="editor-canvas-message"><span className="preview-spinner" aria-hidden="true"/><strong>슬라이드를 불러오는 중</strong></div> : <div className="editor-page-stack" onScroll={(event) => { const cards = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[data-slide-index]')); const middle = event.currentTarget.getBoundingClientRect().top + event.currentTarget.clientHeight / 2; const nearest = cards.reduce((best, card) => Math.abs(card.getBoundingClientRect().top + card.offsetHeight / 2 - middle) < Math.abs(best.getBoundingClientRect().top + best.offsetHeight / 2 - middle) ? card : best, cards[0]); if (nearest) { setPreviewIndex(Number(nearest.dataset.slideIndex)); setSelectedTextSlide(null); } }}>
-                {(prepared?.thumbnails ?? []).map((thumbnail, slide) => { const position = slidePositions[slide] ?? prepared?.slides[slide]?.textPosition ?? { x: pptStyle.textX, y: pptStyle.textY, width: pptStyle.textWidth, height: pptStyle.textHeight }; const selectedText = selectedTextSlide === slide; const page = prepared?.slides[slide]; const scoreRows = page?.autoScore && (selectedText || editingSlide === slide || slideTextOverrides[slide] !== undefined) ? undefined : page?.scoreRows; return <div className={`editor-page-sheet ${previewIndex === slide ? 'is-current' : ''}${scoreRows?.length ? ' has-score-rows' : ''}`} data-slide-index={slide} key={displaySlideOrder[slide] ?? slide} style={{aspectRatio:`${slideSize.width} / ${slideSize.height}`}}><img src={`data:image/png;base64,${thumbnail}`} alt="슬라이드 배경"/><div className="editor-slide-text" style={{left:`${position.x-position.width/2}%`,top:`${position.y-position.height/2}%`,width:`${position.width}%`,height:`${position.height}%`,fontFamily:pptStyle.fontFamily,fontSize:`${pptStyle.fontSize/960*100}cqw`,fontWeight:pptStyle.bold?700:400,color:slideTextColors[slide]??pptStyle.textColor,justifyContent:pptStyle.alignment==='LEFT'?'flex-start':pptStyle.alignment==='RIGHT'?'flex-end':'center',lineHeight:1.2}} onClick={() => { if (editingSlide !== slide) { setPreviewIndex(slide); setSelectedTextSlide(slide); } }} onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation(); setPreviewIndex(slide); setSelectedTextSlide(slide); setEditingSlide(slide); }} onPointerDown={(event) => { if (selectedText && editingSlide !== slide && !(event.target instanceof HTMLTextAreaElement)) startTextBoxInteraction(event, slide, position); }} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction} role="button" tabIndex={0} aria-label={`${slide+1}페이지 가사 텍스트 선택`} title="두 번 클릭하여 가사 수정">{editingSlide === slide ? <textarea className="editor-slide-textarea" autoFocus value={slideTextOverrides[slide] ?? prepared?.slides[slide]?.lines.join('\n') ?? ''} onChange={(event) => setSlideTextOverrides((items) => ({ ...items, [slide]: event.target.value }))} onPointerDown={(event) => event.stopPropagation()} onBlur={() => setEditingSlide(null)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setEditingSlide(null); } }} aria-label={`${slide+1}페이지 가사 편집`} /> : <span style={{display:'block',width:'100%',textAlign:pptStyle.alignment.toLowerCase() as CanvasTextAlign}}>{slideTextOverrides[slide] ?? prepared?.slides[slide]?.lines.join('\n')}</span>}</div>{scoreRows?.length ? <ScoreRowsOverlay rows={scoreRows} fontFamily={pptStyle.fontFamily} fontSize={pptStyle.fontSize} color={slideTextColors[slide] ?? pptStyle.textColor} bold={pptStyle.bold} onSelect={page?.autoScore ? () => { setPreviewIndex(slide); setSelectedTextSlide(slide); } : undefined} /> : null}{selectedText && !scoreRows?.length && <div className="text-box-selection" style={{left:`${position.x-position.width/2}%`,top:`${position.y-position.height/2}%`,width:`${position.width}%`,height:`${position.height}%`}} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction} role="group" aria-label="가사 상자 위치와 크기 조절"><i className="text-box-handle text-box-handle--tl"/><i className="text-box-handle text-box-handle--tr"/><i className="text-box-handle text-box-handle--bl"/><button className="text-box-handle text-box-handle--br" type="button" aria-label="가사 상자 크기 조절" onPointerDown={(event) => startTextBoxInteraction(event, slide, position, 'resize')} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction}/></div>}<span className="editor-page-label">{slide + 1} 페이지</span><button className="editor-page-delete" type="button" aria-label={`${slide + 1}페이지 삭제`} onClick={() => removeSlide(slide)}>×</button></div>; })}
+                {(prepared?.thumbnails ?? []).map((thumbnail, slide) => { const position = slidePositions[slide] ?? prepared?.slides[slide]?.textPosition ?? { x: pptStyle.textX, y: pptStyle.textY, width: pptStyle.textWidth, height: pptStyle.textHeight }; const selectedText = selectedTextSlide === slide; return <div className={`editor-page-sheet ${previewIndex === slide ? 'is-current' : ''}`} data-slide-index={slide} key={displaySlideOrder[slide] ?? slide} style={{aspectRatio:`${slideSize.width} / ${slideSize.height}`}}><img src={`data:image/png;base64,${thumbnail}`} alt="슬라이드 배경"/><div className="editor-slide-text" style={{left:`${position.x-position.width/2}%`,top:`${position.y-position.height/2}%`,width:`${position.width}%`,height:`${position.height}%`,fontFamily:pptStyle.fontFamily,fontSize:`${pptStyle.fontSize/960*100}cqw`,fontWeight:pptStyle.bold?700:400,color:slideTextColors[slide]??pptStyle.textColor,justifyContent:pptStyle.alignment==='LEFT'?'flex-start':pptStyle.alignment==='RIGHT'?'flex-end':'center',lineHeight:1.2}} onClick={() => { if (editingSlide !== slide) { setPreviewIndex(slide); setSelectedTextSlide(slide); } }} onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation(); setPreviewIndex(slide); setSelectedTextSlide(slide); setEditingSlide(slide); }} onPointerDown={(event) => { if (selectedText && editingSlide !== slide && !(event.target instanceof HTMLTextAreaElement)) startTextBoxInteraction(event, slide, position); }} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction} role="button" tabIndex={0} aria-label={`${slide+1}페이지 가사 텍스트 선택`} title="두 번 클릭하여 가사 수정">{editingSlide === slide ? <textarea className="editor-slide-textarea" autoFocus value={slideTextOverrides[slide] ?? prepared?.slides[slide]?.lines.join('\n') ?? ''} onChange={(event) => setSlideTextOverrides((items) => ({ ...items, [slide]: event.target.value }))} onPointerDown={(event) => event.stopPropagation()} onBlur={() => setEditingSlide(null)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setEditingSlide(null); } }} aria-label={`${slide+1}페이지 가사 편집`} /> : <span style={{display:'block',width:'100%',textAlign:pptStyle.alignment.toLowerCase() as CanvasTextAlign}}>{slideTextOverrides[slide] ?? prepared?.slides[slide]?.lines.join('\n')}</span>}</div>{selectedText && <div className="text-box-selection" style={{left:`${position.x-position.width/2}%`,top:`${position.y-position.height/2}%`,width:`${position.width}%`,height:`${position.height}%`}} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction} role="group" aria-label="가사 상자 위치와 크기 조절"><i className="text-box-handle text-box-handle--tl"/><i className="text-box-handle text-box-handle--tr"/><i className="text-box-handle text-box-handle--bl"/><button className="text-box-handle text-box-handle--br" type="button" aria-label="가사 상자 크기 조절" onPointerDown={(event) => startTextBoxInteraction(event, slide, position, 'resize')} onPointerMove={moveTextBoxInteraction} onPointerUp={endTextBoxInteraction} onPointerCancel={endTextBoxInteraction}/></div>}<span className="editor-page-label">{slide + 1} 페이지</span><button className="editor-page-delete" type="button" aria-label={`${slide + 1}페이지 삭제`} onClick={() => removeSlide(slide)}>×</button></div>; })}
               </div>}
             </div>
             <div className="editor-filmstrip" aria-label="슬라이드 페이지">
@@ -1158,7 +1101,7 @@ export function WorshipApp() {
                 const position = slidePositions[slide] ?? prepared?.slides[slide]?.textPosition ?? { x: 50, y: 50, width: 60, height: 25 };
                 return <div className={`filmstrip-page-shell ${preview?.slideIndex === slide ? 'is-active' : ''}${draggedSlideIndex === slide ? ' is-dragging' : ''}${dropSlideIndex === slide ? ' is-drop-target' : ''}`} key={displaySlideOrder[slide] ?? slide} draggable={Boolean(preview)} onDragStart={(event) => { if ((event.target as HTMLElement).closest('.filmstrip-page-delete')) { event.preventDefault(); return; } draggedSlideIndexRef.current = slide; setDraggedSlideIndex(slide); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', String(slide)); const ghost = event.currentTarget.cloneNode(true) as HTMLElement; ghost.classList.remove('is-dragging', 'is-drop-target'); ghost.style.position = 'fixed'; ghost.style.left = '-10000px'; ghost.style.top = '0'; ghost.style.opacity = '1'; ghost.style.pointerEvents = 'none'; document.body.append(ghost); event.dataTransfer.setDragImage(ghost, Math.min(event.nativeEvent.offsetX, ghost.offsetWidth), Math.min(event.nativeEvent.offsetY, ghost.offsetHeight)); requestAnimationFrame(() => ghost.remove()); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; if (draggedSlideIndexRef.current !== null) setDropSlideIndex(slide); }} onDrop={(event) => { event.preventDefault(); const from = draggedSlideIndexRef.current; if (from !== null) reorderSlides(from, slide); draggedSlideIndexRef.current = null; setDraggedSlideIndex(null); setDropSlideIndex(null); }} onDragEnd={() => { draggedSlideIndexRef.current = null; setDraggedSlideIndex(null); setDropSlideIndex(null); }} aria-roledescription="끌어서 순서 변경" title="끌어서 슬라이드 순서 변경">
                   <button className="filmstrip-page" type="button" onClick={() => { setPreviewIndex(slide); document.querySelector<HTMLElement>(`[data-slide-index="${slide}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }} disabled={!preview} aria-label={`${slide + 1}번 슬라이드 미리보기 · 끌어서 순서 변경`} aria-current={preview?.slideIndex === slide ? 'page' : undefined}>
-                    <span className={`filmstrip-canvas${prepared?.slides[slide]?.scoreRows?.length ? ' has-score-rows' : ''}`}>{prepared?.thumbnails[slide] && <img src={`data:image/png;base64,${prepared.thumbnails[slide]}`} alt="" />}<span className="filmstrip-lyrics" style={{left:`${position.x-position.width/2}%`,top:`${position.y-position.height/2}%`,width:`${position.width}%`,height:`${position.height}%`,fontFamily:pptStyle.fontFamily,fontSize:`${pptStyle.fontSize/960*100}cqw`,fontWeight:pptStyle.bold?700:400,color:slideTextColors[slide]??pptStyle.textColor,textAlign:pptStyle.alignment.toLowerCase() as CanvasTextAlign}}>{slideTextOverrides[slide] ?? prepared?.slides[slide]?.lines.join('\n')}</span>{prepared?.slides[slide]?.scoreRows?.length ? <span className="filmstrip-score">{prepared.slides[slide].scoreRows.map((row, rowIndex) => <span key={rowIndex}>{row.staff && <img src={row.staff} alt="" />}<small>{row.lyrics}</small></span>)}</span> : null}</span><span className="filmstrip-number">{slide + 1}</span>
+                    <span className={`filmstrip-canvas`}>{prepared?.thumbnails[slide] && <img src={`data:image/png;base64,${prepared.thumbnails[slide]}`} alt="" />}<span className="filmstrip-lyrics" style={{left:`${position.x-position.width/2}%`,top:`${position.y-position.height/2}%`,width:`${position.width}%`,height:`${position.height}%`,fontFamily:pptStyle.fontFamily,fontSize:`${pptStyle.fontSize/960*100}cqw`,fontWeight:pptStyle.bold?700:400,color:slideTextColors[slide]??pptStyle.textColor,textAlign:pptStyle.alignment.toLowerCase() as CanvasTextAlign}}>{slideTextOverrides[slide] ?? prepared?.slides[slide]?.lines.join('\n')}</span></span><span className="filmstrip-number">{slide + 1}</span>
                   </button>
                   <button className="filmstrip-page-delete" type="button" onClick={() => removeSlide(slide)} aria-label={`${slide + 1}번 슬라이드 삭제`}>×</button>
                 </div>;
@@ -1187,21 +1130,13 @@ export function WorshipApp() {
               </div>}
             </section>
             <div className="manage-column">
-              <section className="panel import-panel" aria-labelledby="import-title">
-                <div className="panel-heading"><div><span className="step-number">02</span><h2 id="import-title">가사 파일 가져오기</h2></div></div>
-                <p className="manage-description">TXT, CSV, JSON, PPTX 파일을 가져옵니다. 곡 제목이 일치하고 가사가 비어 있는 항목에 저장됩니다.</p>
-                <label className="file-field import-file"><span>파일 선택</span><input type="file" multiple accept=".txt,.csv,.json,.pptx" onChange={importFiles} /><small>최대 50개 · 전체 8MB까지</small></label>
-                {importNotice && <p className={`notice ${importNotice.kind ?? ''}`} role="status">{importNotice.text}</p>}
-                {importing && <div className="loading-line" aria-label="가사 파일을 가져오는 중" />}
-              </section>
               <section className="panel request-panel" aria-labelledby="requests-title">
-                <div className="panel-heading"><div><span className="step-number">03</span><h2 id="requests-title">추가할 곡 대기열</h2></div></div>
+                <div className="panel-heading"><div><span className="step-number">02</span><h2 id="requests-title">추가할 곡 대기열</h2></div></div>
                 <p className="manage-description">검색한 곡이 준비되지 않은 경우 이곳에 요청이 기록됩니다.</p>
                 <form className="request-search" onSubmit={(event) => { event.preventDefault(); void loadRequests(); }}><label className="field"><span className="visually-hidden">요청 검색</span><input value={requestQuery} onChange={(event) => setRequestQuery(event.target.value)} placeholder="곡 제목 또는 작사가" /></label><button className="btn btn--secondary" type="submit">조회</button></form>
                 {requestNotice && <p className={`notice ${requestNotice.kind ?? ''}`} role="status">{requestNotice.text}</p>}
                 <div className="requests-list">{requests.length === 0 ? <div className="empty-state">대기 중인 곡이 없습니다.</div> : requests.map((request) => <div className="request-row" key={request.id}>
                   <div><strong>{request.title}</strong><small>작사 {displayPerson(request.lyricist)} · 요청 {request.count}회</small></div>
-                  <label className="link-request"><span className="visually-hidden">연결할 곡 선택</span><select defaultValue="" onChange={(event) => { if (event.target.value) void completeRequest(request, Number(event.target.value)); }}><option value="">연결할 곡</option>{allSongs.map((song) => <option key={song.id} value={song.id}>{song.title} · ID {song.id}</option>)}</select></label>
                 </div>)}</div>
               </section>
             </div>

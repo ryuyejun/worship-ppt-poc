@@ -61,7 +61,7 @@ function resolveRelationshipTarget(slidePath: string, target: string) {
 
 /**
  * Converts PPT's white-to-transparent picture effect into PNG alpha so the
- * browser slide renderer preserves lyric and score overlays on top of artwork.
+ * browser slide renderer preserves lyric text over imported artwork.
  */
 export async function preparePptxTransparency(bytes: Uint8Array) {
   const { default: JSZip } = await import('jszip');

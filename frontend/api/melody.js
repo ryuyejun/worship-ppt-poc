@@ -379,12 +379,11 @@ async function submitSearch(req, res, incoming) {
       sourceFileUrl: firstSource.sourceFileUrl,
       sourceFileType: firstSource.sourceFileType,
       sourceAlternatives: fallbackSources,
-      bpm: 100, vocalStartSec: 0, vocalEndSec: 0, notes: [], reviewed: false,
     };
     res.statusCode = 200;
     res.setHeader('content-type', 'application/json; charset=utf-8');
     res.setHeader('cache-control', 'no-store');
-    res.end(JSON.stringify({ jobId: randomUUID().replaceAll('-', ''), state: 'ready', revision: 1, score }));
+    res.end(JSON.stringify({ jobId: randomUUID().replaceAll('-', ''), state: 'ready', score }));
   } catch (error) {
     sendJson(res, 404, error instanceof Error ? error.message : '악보 파일을 찾지 못했습니다.');
   }

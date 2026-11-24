@@ -17,18 +17,13 @@ const backend: ProxyOptions = {
 export default defineConfig({
   server: {
     proxy: {
-      '/subtitle-lyrics': 'http://127.0.0.1:8001',
-      '/api/auto-melody': process.env.VITE_AUTO_MELODY_TARGET || 'http://127.0.0.1:8090',
-      '/api/midi': process.env.VITE_MIDI_API_TARGET || backend,
+      '/api/auto-melody/jobs': process.env.VITE_AUTO_MELODY_TARGET || 'http://127.0.0.1:8090',
       '/auth': backend,
       '/search': backend,
-      '/providers': backend,
       '/songs': backend,
-      '/song-lyrics': backend,
       '^/song(?:$|\\?)': backend,
       '/ppt-songs': backend,
       '/requests': backend,
-      '/batch-import': backend,
       '/ppt': backend,
       '/song-artwork': backend,
       '/youtube-videos': backend,

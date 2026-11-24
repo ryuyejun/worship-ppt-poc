@@ -1,17 +1,16 @@
 import type { AutoMelody } from './auto-melody';
 import type { Song } from './types';
-import type { ScoreSlide } from './score';
 
 export type SlideTextPosition = { x: number; y: number; width: number; height: number };
 export type SlideStyle = { backgroundColor: string; textColor: string; fontFamily: string; fontSize: number; alignment: 'LEFT' | 'CENTER' | 'RIGHT'; linesPerSlide: number; bold: boolean; textX?: number; textY?: number; textWidth?: number; textHeight?: number; backgroundImageBase64?: string; backgroundImageType?: string };
 export type SlideSize = { width: number; height: number };
-export type PresentationInput = { slideSize?: SlideSize; songIds: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; autoMelodies?: Record<number, AutoMelody>; scorePages?: { title: string; slides: ScoreSlide[] }[]; extraSlides?: number; removedSlideIndexes?: number[]; slideOrder?: number[]; slidePositions?: Record<number, SlideTextPosition>; slideTextOverrides?: Record<number, string>; slideTextColors?: Record<number, string>; pptxBase64?: string; style: SlideStyle };
+export type PresentationInput = { slideSize?: SlideSize; songIds: number[]; externalSongs?: { id: number; title: string; artist: string | null; lyrics: string }[]; autoMelodies?: Record<number, AutoMelody>; extraSlides?: number; removedSlideIndexes?: number[]; slideOrder?: number[]; slidePositions?: Record<number, SlideTextPosition>; slideTextOverrides?: Record<number, string>; slideTextColors?: Record<number, string>; pptxBase64?: string; style: SlideStyle };
 export function normalizeSlideOrder(order: number[] | undefined, count: number): number[] {
   const valid = (order ?? []).filter((index, position, indexes) => Number.isInteger(index) && index >= 0 && index < count && indexes.indexOf(index) === position);
   const included = new Set(valid);
   return [...valid, ...Array.from({ length: count }, (_, index) => index).filter(index => !included.has(index))];
 }
-export type Slide = { scorePageImage?: string; autoScore?: boolean; title: string; lines: string[]; scoreRows?: ScoreSlide['rows']; textPosition?: SlideTextPosition; textColor?: string };
+export type Slide = { scorePageImage?: string; title: string; lines: string[]; textPosition?: SlideTextPosition; textColor?: string };
 const lyricCache = new Map<number, Song>();
 
 function lyricLineWidth(text: string, fontSize: number): number {
@@ -141,31 +140,12 @@ export async function collectSlides(input: PresentationInput, signal?: AbortSign
   const lineHeight = input.style.fontSize * 96 / 72 * 1.2;
   const fittingLines = Math.max(1, Math.floor(slideHeight * maxTextHeight / 100 / lineHeight));
   const safeLinesPerSlide = Math.min(input.style.linesPerSlide, fittingLines);
-  const scoresByTitle = new Map((input.scorePages ?? []).map(score => [score.title.normalize('NFC').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, ''), score]));
-  const scoreRenderer = input.autoMelodies && Object.keys(input.autoMelodies).length
-    ? await import('./score').catch(() => null) : null;
-  type ScoredSlide = Slide & { autoRows?: { bpm: number; key?: string; notes: AutoMelody['notes'][] } };
-  const slides = songs.flatMap<ScoredSlide>(song => {
-    const title = song.title.normalize('NFC').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
-    const score = scoresByTitle.get(title);
-    if (score?.slides.length) {
-      return score.slides.map(page => ({ title: song.title, lines: page.rows.map(row => row.lyrics), scoreRows: page.rows }));
-    }
+  const slides = songs.flatMap(song => {
     const original = input.autoMelodies?.[song.id];
     if (original?.sourceType === 'sheet-image' && original.sheetImages?.length) {
-      return original.sheetImages.map(scorePageImage => ({title:song.title,lines:[],scorePageImage,autoScore:true}));
+      return original.sheetImages.map(scorePageImage => ({ title: song.title, lines: [], scorePageImage }));
     }
-    const pages = splitLyrics(song.lyrics, safeLinesPerSlide, layout);
-    const candidate = input.autoMelodies?.[song.id];
-    const melody = candidate?.title === song.title ? candidate : undefined;
-    const rows = melody && scoreRenderer
-      ? scoreRenderer.alignMelodyNotes(pages.flat(), melody.notes.slice(melody.lyricsStart ?? 0), melody.bpm) : [];
-    let rowIndex = 0;
-    return pages.map(lines => {
-      const notes = rows.slice(rowIndex, rowIndex + lines.length);
-      rowIndex += lines.length;
-      return { title: song.title, lines, autoRows: melody && notes.length ? { bpm: melody.bpm, key: melody.key ?? undefined, notes } : undefined };
-    });
+    return splitLyrics(song.lyrics, safeLinesPerSlide, layout).map(lines => ({ title: song.title, lines }));
   });
   const extraSlides = Math.max(0, Math.min(100, Math.floor(input.extraSlides ?? 0)));
   if (!slides.length) slides.push({ title: '', lines: [] });
@@ -173,23 +153,15 @@ export async function collectSlides(input: PresentationInput, signal?: AbortSign
   const removed = new Set((input.removedSlideIndexes ?? []).filter(index => Number.isInteger(index) && index >= 0));
   const visibleSlides = slides.filter((_, index) => !removed.has(index));
   const orderedVisibleSlides = normalizeSlideOrder(input.slideOrder, visibleSlides.length).map(index => visibleSlides[index]);
-  const result: ScoredSlide[] = orderedVisibleSlides.length ? orderedVisibleSlides : [{ title: '', lines: [] }];
-  return Promise.all(result.map(async ({ autoRows, ...slide }, index) => {
+  const result = orderedVisibleSlides.length ? orderedVisibleSlides : [{ title: '', lines: [] }];
+  return result.map((slide, index) => {
     const color = input.slideTextColors?.[index] ?? input.style.textColor;
-    if (autoRows && scoreRenderer && input.slideTextOverrides?.[index] === undefined && !signal?.aborted) {
-      const rows = slide.lines.map((lyrics, line) => ({ lyrics, notes: autoRows.notes[line] }));
-      const scoreRows = await scoreRenderer.renderAutoScoreRows(rows, autoRows.bpm, color, autoRows.key).catch(() => []);
-      if (scoreRows.length) {
-        slide.scoreRows = scoreRows;
-        slide.autoScore = true;
-      }
-    }
     const longestLine = Math.max(1, ...slide.lines.map(line => [...line].length));
     const width = Math.max(18, Math.min(90, longestLine * ((input.style.fontSize ?? 40) / 960) * 100 + 3));
     const aspect = (input.slideSize?.height ?? 720) / (input.slideSize?.width ?? 1280);
     const height = Math.max(12, Math.min(80, slide.lines.length * (input.style.fontSize / 960) * 120 / aspect + 3));
     return { ...slide, lines: input.slideTextOverrides?.[index] !== undefined ? input.slideTextOverrides[index].split(/\r\n|\r|\n/) : slide.lines, textPosition: input.slidePositions?.[index] ?? { x: input.style.textX ?? 50, y: input.style.textY ?? 50, width: input.style.textWidth === 87.5 ? width : input.style.textWidth ?? width, height: input.style.textHeight === 55.6 ? height : input.style.textHeight ?? height }, textColor: color };
-  }));
+  });
 }
 
 export async function makePresentation(slides: Slide[], style: SlideStyle, size = {width:1280,height:720}): Promise<Blob> {
@@ -208,21 +180,6 @@ export async function makePresentation(slides: Slide[], style: SlideStyle, size 
       const imageHeight = imageWidth * 9 / 16;
       slide.addImage({ data: item.scorePageImage, x: (size.width - imageWidth) / 192,
         y: (size.height - imageHeight) / 192, w: imageWidth / 96, h: imageHeight / 96 });
-      continue;
-    }
-    if (item.scoreRows?.length) {
-      const rowCount = item.scoreRows.length;
-      const rowHeight = Math.min(2.05, (size.height / 96) * 0.84 / rowCount);
-      const rowScale = rowHeight / 2.05;
-      const blockHeight = rowCount * rowHeight;
-      const startY = (size.height / 96 - blockHeight) / 2;
-      item.scoreRows.forEach((row, index) => {
-        const y = startY + index * rowHeight;
-        if (row.staff) slide.addImage({ data: row.staff, x: 0.7, y, w: size.width / 96 - 1.4, h: 1.2 * rowScale });
-        slide.addText(row.lyrics, { x: 0.9, y: y + 1.2 * rowScale, w: size.width / 96 - 1.8, h: 0.7 * rowScale,
-          fontFace: style.fontFamily, fontSize: style.fontSize, color: (item.textColor ?? style.textColor).replace('#', ''),
-          bold: style.bold, align: alignment[style.alignment], valign: 'middle', margin: 0, fit: 'shrink' });
-      });
       continue;
     }
     const position = item.textPosition ?? { x: style.textX ?? 50, y: style.textY ?? 50, width: style.textWidth ?? 87.5, height: style.textHeight ?? 55.6 };

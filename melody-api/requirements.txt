@@ -1,15 +1,6 @@
 fastapi>=0.115,<1
 uvicorn>=0.34,<1
-yt-dlp[default]
-demucs==4.0.1
-basic-pitch[onnx]==0.4.0
-numpy<2
-librosa>=0.10.2,<0.12
-torch==2.5.1
-torchaudio==2.5.1
-setuptools<81
-music21>=9,<10
-
 requests>=2.32,<3
 beautifulsoup4>=4.12,<5
+numpy<2
 Pillow>=10,<14

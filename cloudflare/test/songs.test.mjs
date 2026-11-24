@@ -48,7 +48,7 @@ test('로그인 없이 검색하고 곡 ID로 저장된 가사를 읽는다', as
 
 test('익명 사용자의 데이터 수정 요청과 큰 요청은 차단한다', async () => {
   const env = { DB: fixture() };
-  assert.equal((await worker.fetch(new Request('https://example.test/batch-import', {method:'POST'}), env)).status, 403);
+  assert.equal((await worker.fetch(new Request('https://example.test/batch-import', {method:'POST'}), env)).status, 404);
   assert.equal((await worker.fetch(new Request('https://example.test/search', {method:'POST', body: 'x'.repeat(4097)}), env)).status, 413);
 });
 

@@ -132,8 +132,7 @@ def find_score_images(title, artist=''):
             except (requests.RequestException, SheetError, OSError, subprocess.SubprocessError) as exc:
                 log.info('Cannot render worship score from %s: %s', page, exc)
                 continue
-            return dict(title=title, sourceType='sheet-image', sourcePage=page, sheetImages=pages,
-                        notes=[], bpm=100, vocalStartSec=0, vocalEndSec=0, notationTransposeSemitones=0)
+            return dict(title=title, sourceType='sheet-image', sourcePage=page, sheetImages=pages)
     if found_attachment:
         raise SheetError('PPT 첨부파일을 찾았지만 오선이 있는 슬라이드로 열 수 없었습니다.')
     raise SheetError('검색한 자료원에서 이 곡의 예배용 악보 PPT를 찾지 못했습니다.')

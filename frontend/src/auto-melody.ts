@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { MelodyNote } from './score';
 import { preparePptxTransparency } from './pptx-transparency';
 
 export type AutoMelody = {
@@ -9,25 +8,12 @@ export type AutoMelody = {
   sourceFileUrl?: string;
   sourceFileType?: string;
   sheetImages?: string[];
-  sheetImageCount?: number;
-  musicxmlUrl?: string;
-  bpm: number;
-  key?: string | null;
-  lyricsStart?: number | null;
-  videoId?: string | null;
-  vocalStartSec: number;
-  vocalEndSec: number;
-  notes: MelodyNote[];
-  jobId: string;
-  revision: number;
-  reviewed: boolean;
 };
 type Song = { id: number; title: string; artist: string | null; source?: string | null; youtubeVideoId?: string | null };
 type Job = {
   jobId: string;
   state: 'queued' | 'running' | 'ready' | 'failed';
   error?: string;
-  revision?: number;
   score?: {
     sourceType?: string;
     sourcePage?: string;
@@ -35,16 +21,6 @@ type Job = {
     sourceFileType?: string;
     sourceAlternatives?: Array<{ sourcePage: string; sourceFileUrl: string; sourceFileType: string }>;
     sheetImages?: string[];
-    sheetImageCount?: number;
-    musicxmlUrl?: string;
-    bpm: number;
-    key?: string | null;
-    lyricsStart?: number | null;
-    videoId?: string | null;
-    vocalStartSec?: number;
-    vocalEndSec?: number;
-    reviewed: boolean;
-    notes: Array<{ pitch: number; startTime: number; duration: number; amplitude: number; beats?: number }>;
   };
 };
 const normalize = (text: string) => text.normalize('NFC').trim().replace(/\s+/g, ' ').toLowerCase();
@@ -63,26 +39,12 @@ const jobsUrl = '/api/auto-melody/jobs';
 
 async function fetchJob(url: string, init?: RequestInit): Promise<Job> {
   const response = await fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(55_000) });
-  if (response.status === 413) throw new Error('파일 또는 악보 데이터가 너무 큽니다.');
-  if (response.status === 409) throw new Error('이미 새 수정본이 저장됐습니다. 악보를 다시 열어 주세요.');
   if (!response.ok) {
     const problem = await response.json().catch(() => null) as { error?: unknown; detail?: unknown } | null;
     const message = problem?.error ?? problem?.detail;
     throw new Error(typeof message === 'string' ? message : '악보 서버에 연결하지 못했습니다.');
   }
   return response.json();
-}
-
-async function fetchSheetImage(jobId: string, index: number) {
-  const response = await fetch(`${jobsUrl}/${jobId}/slides/${index}`, { signal: AbortSignal.timeout(30_000) });
-  if (!response.ok) throw new Error('악보 PPT 페이지를 불러오지 못했습니다.');
-  const blob = await response.blob();
-  return await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('악보 이미지를 읽지 못했습니다.'));
-    reader.onerror = () => reject(new Error('악보 이미지를 읽지 못했습니다.'));
-    reader.readAsDataURL(blob);
-  });
 }
 
 async function fetchPresentationFile(url: string) {
@@ -259,7 +221,7 @@ async function renderPresentationFile(sourceUrl: string, sourceFileType?: string
 
 async function readScore(title: string, job: Job): Promise<AutoMelody> {
   const payload = job.score;
-  if ((!payload?.notes.length && !payload?.sheetImages?.length && !payload?.sheetImageCount && !payload?.sourceFileUrl) || !job.revision) throw new Error('악보 결과가 비어 있습니다.');
+  if (!payload?.sheetImages?.length && !payload?.sourceFileUrl) throw new Error('악보 결과가 비어 있습니다.');
   let sheetImages = payload?.sheetImages;
   let sourcePage = payload?.sourcePage;
   let sourceFileUrl = payload?.sourceFileUrl;
@@ -283,66 +245,17 @@ async function readScore(title: string, job: Job): Promise<AutoMelody> {
     }
     if (!sheetImages && lastError instanceof Error) throw lastError;
   }
-  if (!sheetImages && payload?.sheetImageCount) {
-    if (payload.sheetImageCount > 40) throw new Error('악보 PPT 페이지 수가 너무 많습니다.');
-    sheetImages = [];
-    for (let start = 0; start < payload.sheetImageCount; start += 5) {
-      sheetImages.push(...await Promise.all(Array.from(
-        { length: Math.min(5, payload.sheetImageCount - start) }, (_, offset) => fetchSheetImage(job.jobId, start + offset),
-      )));
-    }
-  }
   return {
     title, sheetImages, sourceType: payload.sourceType,
     sourcePage, sourceFileUrl, sourceFileType,
-    musicxmlUrl: payload.musicxmlUrl, jobId: job.jobId, revision: job.revision, reviewed: payload.reviewed,
-    bpm: payload.bpm, key: payload.key, lyricsStart: payload.lyricsStart, videoId: payload.videoId,
-    vocalStartSec: payload.vocalStartSec ?? 0, vocalEndSec: payload.vocalEndSec ?? 0,
-    notes: payload.notes.map(note => ({
-      pitchMidi: note.pitch, startTimeSeconds: note.startTime, durationSeconds: note.duration,
-      amplitude: note.amplitude, beats: note.beats,
-    })),
   };
 }
 
-export async function getVocalBounds(song: Song, requestedVideoId?: string, signal?: AbortSignal) {
-  const query = new URLSearchParams({ title: song.title.trim(), artist: (song.artist ?? '').trim().slice(0, 120) });
-  const exactVideoId = requestedVideoId || songVideoId(song);
-  if (exactVideoId && /^[A-Za-z0-9_-]{11}$/.test(exactVideoId)) query.set('video_id', exactVideoId);
-  const requestSignal = signal ?? AbortSignal.timeout(210_000);
-  let job = await fetchJob(`${jobsUrl}?${query}`, { method: 'POST', signal: requestSignal });
-  while (job.state === 'queued' || job.state === 'running') {
-    await new Promise<void>((resolve, reject) => {
-      const onAbort = () => {
-        window.clearTimeout(timer);
-        reject(requestSignal.reason ?? new DOMException('Aborted', 'AbortError'));
-      };
-      const timer = window.setTimeout(() => {
-        requestSignal.removeEventListener('abort', onAbort);
-        resolve();
-      }, 2500);
-      if (requestSignal.aborted) onAbort();
-      else requestSignal.addEventListener('abort', onAbort, { once: true });
-    });
-    job = await fetchJob(`${jobsUrl}/${job.jobId}`, { signal: requestSignal });
-  }
-  if (job.state === 'failed') throw new Error(job.error || '보컬 구간을 분석하지 못했습니다.');
-  const start = job.score?.vocalStartSec;
-  const end = job.score?.vocalEndSec;
-  const videoId = job.score?.videoId;
-  if (typeof start !== 'number' || typeof end !== 'number' || end <= start
-      || typeof videoId !== 'string' || !/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
-    throw new Error('실제 가창 구간을 확인하지 못해 자막을 가사로 사용할 수 없습니다.');
-  }
-  return { vocalStartSec: start, vocalEndSec: end, videoId };
-}
-
-async function requestMelody(song: Song, onWaiting: (waiting: boolean) => void, isWanted: () => boolean, file?: File) {
+async function requestMelody(song: Song, onWaiting: (waiting: boolean) => void, isWanted: () => boolean) {
   const query = new URLSearchParams({ title: song.title.trim(), artist: (song.artist ?? '').trim().slice(0, 120) });
   const videoId = songVideoId(song);
   if (videoId) query.set('video_id', videoId);
-  const route = file ? `${jobsUrl}/upload` : jobsUrl;
-  let job = await fetchJob(`${route}?${query}`, { method: 'POST', body: file });
+  let job = await fetchJob(`${jobsUrl}?${query}`, { method: 'POST' });
   while (job.state === 'queued' || job.state === 'running') {
     onWaiting(job.state === 'queued');
     await new Promise(resolve => window.setTimeout(resolve, 4000));
@@ -353,32 +266,6 @@ async function requestMelody(song: Song, onWaiting: (waiting: boolean) => void, 
   return readScore(song.title, job);
 }
 
-export async function uploadMelody(song: Song, file: File, onWaiting: (waiting: boolean) => void) {
-  if (!file.size || file.size > 20 * 1024 * 1024) throw new Error('20MB 이하 음원 파일을 선택해 주세요.');
-  const result = await requestMelody(song, onWaiting, () => true, file);
-  if (!result) throw new Error('음원 분석을 완료하지 못했습니다.');
-  return result;
-}
-
-export async function saveAutoMelody(melody: AutoMelody, notes: MelodyNote[], key: string | null, lyricsStart: number) {
-  const job = await fetchJob(`${jobsUrl}/${melody.jobId}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      revision: melody.revision, key, lyricsStart,
-      notes: notes.map(note => ({
-        pitch: note.pitchMidi, startTime: note.startTimeSeconds, duration: note.durationSeconds,
-        amplitude: note.amplitude, beats: note.beats,
-      })),
-    }),
-  });
-  return readScore(melody.title, job);
-}
-
-export async function reloadAutoMelody(melody: AutoMelody) {
-  return readScore(melody.title, await fetchJob(`${jobsUrl}/${melody.jobId}`));
-}
-
 export function useAutoMelodies(selected: Song[]) {
   const [melodiesByTitle, setMelodiesByTitle] = useState(new Map<string, AutoMelody>());
   const [statuses, setStatuses] = useState(new Map<string, MelodyStatus>());
@@ -386,9 +273,8 @@ export function useAutoMelodies(selected: Song[]) {
   const wanted = useRef(new Set<string>());
 
   useEffect(() => {
-    const candidates = selected.filter(song => song.source !== 'audio-upload');
-    wanted.current = new Set(candidates.map(song => melodyKey(song)));
-    for (const song of candidates) {
+    wanted.current = new Set(selected.map(song => melodyKey(song)));
+    for (const song of selected) {
       const key = melodyKey(song);
       if (!song.title.trim() || requested.current.has(key) || statuses.get(key)?.state === 'failed' || melodiesByTitle.has(key)) continue;
       requested.current.add(key);
@@ -402,7 +288,6 @@ export function useAutoMelodies(selected: Song[]) {
           requested.current.delete(key);
           return;
         }
-        if (!melody) throw new Error('이 음원에서 악보를 만들 수 있는 음표를 찾지 못했습니다.');
         setMelodiesByTitle(items => items.has(key) ? items : new Map(items).set(key, melody));
       }).catch(error => {
         const message = error instanceof DOMException && error.name === 'TimeoutError'
@@ -439,8 +324,6 @@ export function useAutoMelodies(selected: Song[]) {
   return {
     melodies,
     statusFor: (song: Song) => statuses.get(melodyKey(song)),
-    scoreFor: (song: Song) => melodiesByTitle.get(melodyKey(song)),
-    updateScore: (song: Song, score: AutoMelody) => setMelodiesByTitle(items => new Map(items).set(melodyKey(song), score)),
     retry,
   };
 }
