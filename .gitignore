@@ -1,0 +1,45 @@
+# Dependencies and generated build output
+**/node_modules/
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.gradle/
+**/build/
+**/dist/
+**/.vite/
+**/*.tsbuildinfo
+**/*.egg-info/
+**/.server/
+**/.wrangler/
+**/.vercel/
+**/.firebase/
+**/.idea/
+**/.run/
+**/.DS_Store
+
+# Local credentials
+**/.env
+**/.env.*
+!**/.env.example
+**/.dev.vars
+
+# Local databases, backups, logs, and generated files
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite-*
+**/*.sqlite3
+**/*.sqlite3-*
+**/.backups/
+**/backups/
+**/*-debug.log
+**/*.log
+**/*.pptx
+**/*.musicxml
+
+# Local caches and generated artwork
+**/data/artwork/
+**/data/audio-cache/
+**/data/
+**/worker-gateway.token
