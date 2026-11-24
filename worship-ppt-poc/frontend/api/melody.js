@@ -6,8 +6,11 @@ const SCORE_SITES = [
   'cwy0675.tistory.com', 'ccm4u.tistory.com', 'dariuskim.com', 'rialim.tistory.com',
   'peacecreator.tistory.com', 'venti600ml.tistory.com', 'anemoneya.tistory.com',
   'soil1228.tistory.com', 'colordiary.tistory.com', 'w-decrecendo.tistory.com',
+  'jinutus.tistory.com',
 ];
-const FILE_HOSTS = new Set(['ccmhymn.github.io', 'blog.kakaocdn.net', 't1.daumcdn.net', 'download.blog.naver.com']);
+const DONGTAN_HOST = 'dongtanms.kr';
+const DONGTAN_LIST_PAGES = 3;
+const FILE_HOSTS = new Set(['ccmhymn.github.io', 'blog.kakaocdn.net', 't1.daumcdn.net', 'download.blog.naver.com', DONGTAN_HOST]);
 const NAVER_HOST = 'm.blog.naver.com';
 const NAVER_ATTACHMENT_HOST = 'download.blog.naver.com';
 const NAVER_BLOG_ID = 'hyunakk';
@@ -174,7 +177,9 @@ async function siteCandidates(host, title) {
       try { url = new URL(anchor.attr('href'), site); } catch { return; }
       if (url.hostname !== host || !(/\/entry\//.test(decodeURIComponent(url.pathname)) || /^\/(?:m\/)?\d+$/.test(decodeURIComponent(url.pathname)))) return;
       const heading = anchor.find('h2,h3,.title,.tit_post,.tit_thumb').first();
-      const label = (heading.length ? heading : anchor).text().trim().slice(0, 150);
+      const post = anchor.closest('article,.post,.post-item,.list-item').first();
+      const label = (heading.length ? heading : anchor.text().trim() ? anchor : post.length ? post : anchor)
+        .text().trim().replace(/\s+/g, ' ').slice(0, 500);
       if (!matchesTitle(title, label) || ['모음', '목록', '시리즈'].some(word => label.includes(word))) return;
       const path = decodeURIComponent(url.pathname);
       if (/^\/m\/\d+$/.test(path)) url.pathname = path.slice(2);
@@ -189,11 +194,41 @@ async function siteCandidates(host, title) {
   }
 }
 
+async function dongtanCandidates(title) {
+  const site = `https://${DONGTAN_HOST}`;
+  const pages = Array.from({ length: DONGTAN_LIST_PAGES }, (_, index) =>
+    `${site}/praise_sheet_ppt${index ? `?page=${index + 1}` : ''}`);
+  const results = await Promise.all(pages.map(async page => {
+    try {
+      const { $ } = await fetchHtml(page, new Set([DONGTAN_HOST]));
+      const found = new Map();
+      $('a[href]').each((_, element) => {
+        const anchor = $(element);
+        let url;
+        try { url = new URL(anchor.attr('href'), site); } catch { return; }
+        if (url.hostname !== DONGTAN_HOST || !/^\/praise_sheet_ppt\/\d+$/.test(url.pathname)) return;
+        const heading = anchor.find('h2,h3,.title,.tit_post,.title_link').first();
+        const label = (heading.length ? heading.text() : anchor.text()).trim().replace(/\s+/g, ' ').slice(0, 500);
+        if (!matchesTitle(title, label) || ['모음', '목록', '시리즈'].some(word => label.includes(word))) return;
+        url.search = '';
+        url.hash = '';
+        found.set(url.href, [normalize(label) === normalize(title), /ppt/i.test(label)]);
+      });
+      return [...found].sort((a, b) => Number(b[1][0]) - Number(a[1][0]) || Number(b[1][1]) - Number(a[1][1]))
+        .slice(0, 3).map(([url]) => url);
+    } catch {
+      return [];
+    }
+  }));
+  return [...new Set(results.flat())];
+}
+
 async function findCandidates(title) {
   const target = normalize(title);
   if (target.length < 2) throw new Error('악보를 찾으려면 곡 제목을 입력해 주세요.');
   const results = await Promise.all([
     naverCandidates(title),
+    dongtanCandidates(title),
     ...SCORE_SITES.map(host => siteCandidates(host, title)),
   ]);
   return [0, 1, 2].flatMap(index => results.flatMap(items => items[index] ? [items[index]] : []));
@@ -222,7 +257,7 @@ function attachmentLinks($, article, page, title) {
 
 async function findPresentation(title, artist) {
   const pages = await findCandidates(title);
-  const pageHosts = new Set([...SCORE_SITES, NAVER_HOST]);
+  const pageHosts = new Set([...SCORE_SITES, NAVER_HOST, DONGTAN_HOST]);
   const articles = await Promise.all(pages.map(async page => {
     try {
       const { $ } = await fetchHtml(page, pageHosts);
@@ -230,10 +265,13 @@ async function findPresentation(title, artist) {
       const heading = $('h1,h2.title,.title_view,.tit_post').first().text();
       const label = metaTitle || heading;
       const naver = new URL(page).hostname === NAVER_HOST;
+      const dongtan = new URL(page).hostname === DONGTAN_HOST;
       if (naver ? !naverPostMatchesTitle(title, label) : !matchesTitle(title, label)) return null;
       const article = naver
         ? $('.files').first()
-        : $('.tt_article_useless_p_margin,.contents_style').first();
+        : dongtan
+          ? $('.xe_content').first()
+          : $('.tt_article_useless_p_margin,.contents_style').first();
       if (!article.length) return null;
       return { page, links: attachmentLinks($, article, page, title) };
     } catch {
@@ -299,11 +337,22 @@ async function servePresentation(req, res, incoming) {
     return sendJson(res, 416, '악보 파일 범위가 올바르지 않습니다.');
   }
   try {
-    const upstream = await fetch(file.url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; YebitScoreSearch/1.0)', ...(requested ? { Range: requested } : {}) },
-      redirect: 'manual',
-      signal: AbortSignal.timeout(30_000),
-    });
+    let fileUrl = file.url;
+    let upstream;
+    for (let redirectCount = 0; redirectCount <= 4; redirectCount += 1) {
+      upstream = await fetch(fileUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; YebitScoreSearch/1.0)', ...(requested ? { Range: requested } : {}) },
+        redirect: 'manual',
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (![301, 302, 303, 307, 308].includes(upstream.status)) break;
+      const location = upstream.headers.get('location');
+      await upstream.body?.cancel();
+      if (!location || redirectCount === 4) return sendJson(res, 502, '원본 악보 파일 주소가 유효하지 않습니다.');
+      const next = allowedFileUrl(new URL(location, fileUrl).href, file.type);
+      if (!next) return sendJson(res, 502, '원본 악보 파일이 허용된 자료 주소를 벗어났습니다.');
+      fileUrl = next.url;
+    }
     if (!upstream.ok) return sendJson(res, upstream.status, '원본 악보 파일을 다운로드하지 못했습니다.');
     const totalHeader = upstream.headers.get('content-range')?.match(/\/([0-9]+)$/)?.[1];
     const contentType = upstream.headers.get('content-type') || (file.type === 'ppt'
